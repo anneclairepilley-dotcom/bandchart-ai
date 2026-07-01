@@ -6,8 +6,8 @@ AI music arranging and rehearsal app that turns songs into editable lead sheets,
 
 This is the smallest possible working prototype: a local web app where you upload an audio
 file and the backend runs **real audio-to-MIDI transcription** using Spotify's open-source
-[Basic Pitch](https://github.com/spotify/basic-pitch) model. No accounts, no payments, no
-cloud services — everything runs locally and stores files on disk.
+[Basic Pitch](https://github.com/spotify/basic-pitch) model. Everything runs on your own
+computer — no accounts, no payments, no cloud services, no data leaves your machine.
 
 **What it does:**
 - Create a project
@@ -21,24 +21,56 @@ cloud services — everything runs locally and stores files on disk.
 PDF export, MusicXML export, YouTube support, complex editing, stem separation, drums, chord
 detection. Just transcription.
 
-### Architecture
+---
 
-```
-backend/    FastAPI service — local JSON-file project storage, Basic Pitch transcription
-frontend/   Next.js app — upload UI, transcription preview, downloads
-```
+## Quick Start (Mac) — no coding required
 
-- Backend stores everything under `backend/storage/projects/<project_id>/`:
-  `project.json`, the uploaded `audio/`, and the generated `output/transcription.mid` +
-  `output/transcription.json`.
-- Frontend talks to the backend over HTTP (`NEXT_PUBLIC_API_BASE_URL`, default
-  `http://localhost:8000`).
+This folder includes three double-click scripts that do all the technical setup for you.
+Use them in order, top to bottom.
 
-## Running it locally
+**Step 0 — Get the app onto your Mac.** Download or clone this repository, then open the
+`bandchart-ai` folder in Finder. You should see `check.command`, `setup.command`, and
+`start.command` inside it.
 
-Requires **Python 3.10–3.11** and **Node.js 18+**. `ffmpeg` should be installed on your
-system so Basic Pitch/librosa can decode compressed formats like mp3/m4a (wav/flac/ogg work
-without it).
+**Step 1 — Check your computer is ready.** Double-click **`check.command`**.
+
+A Terminal window opens and tells you whether Python, Node.js, npm, and ffmpeg are
+installed, with a one-line command to install anything that's missing (via
+[Homebrew](https://brew.sh) — the script tells you how to get that too, if you don't have it).
+Fix anything marked `[MISSING]`, then run it again until everything says `[OK]`.
+
+**Step 2 — Set everything up.** Double-click **`setup.command`**.
+
+This installs everything the app needs, including TensorFlow (the machine-learning library
+Basic Pitch runs on) — that download can take **several minutes** the first time. Let it run
+until it says "Setup complete!". It's safe to run again later if anything seems broken.
+
+**Step 3 — Start the app.** Double-click **`start.command`**.
+
+This starts the app and opens it in your browser at http://localhost:3000. Keep the Terminal
+window open while you use the app — closing it (or pressing Ctrl+C inside it) stops the app.
+
+That's it. Create a project, upload a song, click "Run Transcription", and download the results.
+
+> **macOS says a script "cannot be opened because it is from an unidentified developer":**
+> right-click (Control-click) the file, choose **Open**, then click **Open** again in the
+> dialog that appears. You only need to do this once per script.
+>
+> **Double-clicking does nothing / opens a text editor instead of Terminal:** open Terminal
+> (Applications → Utilities → Terminal), type `cd `, drag the `bandchart-ai` folder into the
+> window, press Return, then run `./check.command` (and later `./setup.command`,
+> `./start.command`) the same way.
+
+---
+
+## Manual setup (Windows / Linux / advanced users)
+
+The double-click scripts above are macOS-only. On any other platform, or if you'd rather run
+things yourself, follow these steps.
+
+Requires **Python 3.9–3.11** (TensorFlow, which Basic Pitch depends on, doesn't yet support
+newer Python versions) and **Node.js 18+**. Install `ffmpeg` too if you want to transcribe
+compressed formats like mp3/m4a (wav/flac/ogg work without it).
 
 ### 1. Backend (FastAPI + Basic Pitch)
 
@@ -75,6 +107,19 @@ need to point it elsewhere.
 4. Click "Run Transcription" and wait for it to finish (real model inference — a few seconds
    to a couple of minutes depending on file length and your machine)
 5. View the note preview, and download the `.mid` and `.json` files
+
+## Architecture
+
+```
+backend/    FastAPI service — local JSON-file project storage, Basic Pitch transcription
+frontend/   Next.js app — upload UI, transcription preview, downloads
+```
+
+- Backend stores everything under `backend/storage/projects/<project_id>/`:
+  `project.json`, the uploaded `audio/`, and the generated `output/transcription.mid` +
+  `output/transcription.json`.
+- Frontend talks to the backend over HTTP (`NEXT_PUBLIC_API_BASE_URL`, default
+  `http://localhost:8000`).
 
 ## API summary (backend)
 
