@@ -6,6 +6,7 @@ Layout:
     audio/<original_filename>
     output/transcription.mid
     output/transcription.json
+    output/transcription-<instrument>.musicxml
 """
 
 from __future__ import annotations
@@ -54,6 +55,10 @@ def midi_path(project_id: str) -> Path:
 
 def transcription_json_path(project_id: str) -> Path:
     return output_dir(project_id) / "transcription.json"
+
+
+def musicxml_path(project_id: str, instrument_key: str) -> Path:
+    return output_dir(project_id) / f"transcription-{instrument_key.replace('_', '-')}.musicxml"
 
 
 def project_exists(project_id: str) -> bool:

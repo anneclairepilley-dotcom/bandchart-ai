@@ -145,3 +145,11 @@ export function midiDownloadUrl(projectId: string): string {
 export function jsonDownloadUrl(projectId: string): string {
   return `${API_BASE_URL}/api/projects/${projectId}/download/json`;
 }
+
+/** Direct URL for downloading the MusicXML file for a solo instrument. */
+export function musicxmlDownloadUrl(
+  projectId: string,
+  instrumentKey: string
+): string {
+  return `${API_BASE_URL}/api/projects/${projectId}/download/musicxml?instrument=${encodeURIComponent(instrumentKey)}`;
+}

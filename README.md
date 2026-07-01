@@ -2,7 +2,7 @@
 
 AI music arranging and rehearsal app that turns songs into editable lead sheets, solo sheets, band charts and custom arrangements.
 
-## v0.1 — Transcription Prototype
+## v0.2 — Transcription + Solo Parts
 
 This is the smallest possible working prototype: a local web app where you upload an audio
 file and the backend runs **real audio-to-pitch transcription** using
@@ -21,11 +21,15 @@ environments with newer Python versions.
 - Run real pitch-tracking transcription on the uploaded audio (librosa pYIN, runs on CPU, no GPU/TensorFlow needed)
 - Generate a MIDI file and a JSON file listing every detected note (pitch, start time, duration, confidence)
 - Preview the transcription in the browser (simple piano-roll + note table)
-- Download the MIDI and JSON files
+- Pick a solo instrument (concert pitch, piano, flute, violin, alto sax, tenor sax, trumpet,
+  clarinet) — the note table shows both the detected concert pitch and the written pitch,
+  transposed for E♭/B♭ instruments
+- Download MIDI, JSON, and MusicXML (sheet music that opens in
+  [MuseScore](https://musescore.org) and similar apps, written for the chosen instrument;
+  rhythm is intentionally rough for now — fixed 120 BPM, notes snapped to a sixteenth grid)
 
-**Explicitly out of scope for v0.1:** accounts, payments, full band charts, rehearsal packs,
-PDF export, MusicXML export, YouTube support, complex editing, stem separation, drums, chord
-detection. Just transcription.
+**Explicitly out of scope so far:** accounts, payments, full band charts, rehearsal packs,
+PDF export, YouTube support, complex editing, stem separation, drums, chord detection.
 
 ---
 
@@ -156,7 +160,12 @@ else.
 3. Upload an audio file
 4. Click "Run Transcription" and wait for it to finish (real pitch-tracking analysis — a few
    seconds to a minute or so depending on file length and your machine)
-5. View the note preview, and download the `.mid` and `.json` files
+5. View the note preview, pick a solo instrument, and download the `.mid`, `.json` and
+   `.musicxml` files
+
+> **Updating from an older version?** After `git pull`, run
+> `pip install -r requirements.txt` in the backend once more (with the virtual environment
+> active) — v0.2 adds the `music21` library for MusicXML export.
 
 ## Troubleshooting
 
@@ -205,6 +214,7 @@ All endpoints are under `/api`.
 | GET | `/projects/{id}/audio` | Stream the original uploaded audio |
 | GET | `/projects/{id}/download/midi` | Download the generated MIDI file |
 | GET | `/projects/{id}/download/json` | Download the generated notes JSON file |
+| GET | `/projects/{id}/download/musicxml?instrument=<key>` | Download MusicXML for a solo instrument — keys: `concert`, `piano`, `flute`, `violin`, `alto_sax`, `tenor_sax`, `trumpet`, `clarinet` |
 
 Each note in the JSON output has: `pitch` (MIDI number), `pitch_name` (e.g. `"C4"`),
 `start_time` (seconds), `duration` (seconds), and `confidence` (0–1, pYIN's voiced-pitch

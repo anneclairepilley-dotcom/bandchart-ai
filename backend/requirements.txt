@@ -5,3 +5,4 @@ librosa
 soundfile
 numpy
 pretty_midi
+music21
