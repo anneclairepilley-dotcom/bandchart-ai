@@ -1,10 +1,13 @@
 // Typed fetch helpers for the BandChart AI backend API.
 //
-// Base URL is read from NEXT_PUBLIC_API_BASE_URL, falling back to the local
-// FastAPI dev server. All backend routes live under /api.
+// By default the base URL is empty: requests go to this app's own origin
+// (/api/...) and the Next.js server proxies them to the FastAPI backend
+// (see next.config.ts). That way the browser never needs direct access to
+// the backend's port, which matters in remote environments like GitHub
+// Codespaces. Set NEXT_PUBLIC_API_BASE_URL only if the browser should hit
+// a backend on a different host directly.
 
-export const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "";
 
 export type ProjectStatus =
   | "created"
@@ -62,7 +65,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     response = await fetch(`${API_BASE_URL}${path}`, init);
   } catch {
     throw new ApiError(
-      `Could not reach backend at ${API_BASE_URL}. Is the server running?`
+      API_BASE_URL
+        ? `Could not reach backend at ${API_BASE_URL}. Is the server running?`
+        : "Could not reach the backend. Is the backend server running on port 8000?"
     );
   }
 
