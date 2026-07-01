@@ -1,0 +1,196 @@
+"""BandChart AI backend - FastAPI app exposing the /api project + transcription routes."""
+
+from __future__ import annotations
+
+import json
+import mimetypes
+from pathlib import Path
+
+from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+
+from app import storage
+from app.models import Project, ProjectCreate
+from app.transcription import run_transcription
+
+app = FastAPI(title="BandChart AI Backend", version="0.1.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+ALLOWED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aiff", ".aif"}
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50MB
+
+AUDIO_CONTENT_TYPES = {
+    ".wav": "audio/wav",
+    ".mp3": "audio/mpeg",
+    ".flac": "audio/flac",
+    ".ogg": "audio/ogg",
+    ".m4a": "audio/mp4",
+    ".aiff": "audio/aiff",
+    ".aif": "audio/aiff",
+}
+
+
+def _get_project_or_404(project_id: str) -> Project:
+    project = storage.load_project(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
+
+
+@app.post("/api/projects", response_model=Project, status_code=201)
+def create_project(body: ProjectCreate) -> Project:
+    project_id = storage.new_project_id()
+    ts = storage.now_iso()
+    project = Project(
+        id=project_id,
+        name=body.name,
+        status="created",
+        created_at=ts,
+        updated_at=ts,
+        audio_filename=None,
+        note_count=None,
+        error=None,
+    )
+    storage.create_project_dirs(project_id)
+    storage.save_project(project)
+    return project
+
+
+@app.get("/api/projects", response_model=list[Project])
+def get_projects() -> list[Project]:
+    return storage.list_projects()
+
+
+@app.get("/api/projects/{project_id}", response_model=Project)
+def get_project(project_id: str) -> Project:
+    return _get_project_or_404(project_id)
+
+
+@app.post("/api/projects/{project_id}/audio", response_model=Project)
+async def upload_audio(project_id: str, file: UploadFile = File(...)) -> Project:
+    project = _get_project_or_404(project_id)
+
+    original_name = file.filename or ""
+    # Use only the basename to avoid any path traversal from a crafted filename.
+    safe_name = Path(original_name).name
+    ext = Path(safe_name).suffix.lower()
+    if ext not in ALLOWED_AUDIO_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file extension '{ext}'. Accepted: "
+            + ", ".join(sorted(ALLOWED_AUDIO_EXTENSIONS)),
+        )
+
+    contents = await file.read()
+    if len(contents) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=400, detail="File exceeds 50MB limit")
+    if len(contents) == 0:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+    a_dir = storage.audio_dir(project_id)
+    a_dir.mkdir(parents=True, exist_ok=True)
+
+    # Remove any previously uploaded audio for this project before saving the new one.
+    for existing in a_dir.iterdir():
+        if existing.is_file():
+            existing.unlink()
+
+    saved_filename = safe_name
+    saved_path = a_dir / saved_filename
+    saved_path.write_bytes(contents)
+
+    project.audio_filename = saved_filename
+    project.status = "uploaded"
+    project.updated_at = storage.now_iso()
+    project.error = None
+    storage.save_project(project)
+    return project
+
+
+@app.post("/api/projects/{project_id}/transcribe", response_model=Project)
+def transcribe(project_id: str) -> Project:
+    project = _get_project_or_404(project_id)
+
+    if not project.audio_filename:
+        raise HTTPException(status_code=400, detail="No audio uploaded for this project yet")
+
+    audio_path = storage.audio_dir(project_id) / project.audio_filename
+    if not audio_path.exists():
+        raise HTTPException(status_code=400, detail="Uploaded audio file is missing on disk")
+
+    project.status = "transcribing"
+    project.updated_at = storage.now_iso()
+    project.error = None
+    storage.save_project(project)
+
+    try:
+        result = run_transcription(
+            audio_path=audio_path,
+            midi_out_path=storage.midi_path(project_id),
+            json_out_path=storage.transcription_json_path(project_id),
+            project_id=project.id,
+            project_name=project.name,
+            source_audio_filename=project.audio_filename,
+        )
+    except Exception as exc:  # noqa: BLE001
+        project.status = "failed"
+        project.error = str(exc)
+        project.updated_at = storage.now_iso()
+        storage.save_project(project)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    project.status = "transcribed"
+    project.note_count = result["note_count"]
+    project.error = None
+    project.updated_at = storage.now_iso()
+    storage.save_project(project)
+    return project
+
+
+@app.get("/api/projects/{project_id}/notes")
+def get_notes(project_id: str) -> JSONResponse:
+    _get_project_or_404(project_id)
+    json_path = storage.transcription_json_path(project_id)
+    if not json_path.exists():
+        raise HTTPException(status_code=404, detail="Project has not been transcribed yet")
+    data = json.loads(json_path.read_text())
+    return JSONResponse(content=data)
+
+
+@app.get("/api/projects/{project_id}/audio")
+def get_audio(project_id: str) -> FileResponse:
+    project = _get_project_or_404(project_id)
+    if not project.audio_filename:
+        raise HTTPException(status_code=404, detail="No audio uploaded for this project")
+    audio_path = storage.audio_dir(project_id) / project.audio_filename
+    if not audio_path.exists():
+        raise HTTPException(status_code=404, detail="Audio file missing on disk")
+    ext = audio_path.suffix.lower()
+    content_type = AUDIO_CONTENT_TYPES.get(ext) or mimetypes.guess_type(str(audio_path))[0] or "application/octet-stream"
+    return FileResponse(path=str(audio_path), media_type=content_type, filename=audio_path.name)
+
+
+@app.get("/api/projects/{project_id}/download/midi")
+def download_midi(project_id: str) -> FileResponse:
+    _get_project_or_404(project_id)
+    midi_p = storage.midi_path(project_id)
+    if not midi_p.exists():
+        raise HTTPException(status_code=404, detail="Project has not been transcribed yet")
+    return FileResponse(path=str(midi_p), media_type="audio/midi", filename="transcription.mid")
+
+
+@app.get("/api/projects/{project_id}/download/json")
+def download_json(project_id: str) -> FileResponse:
+    _get_project_or_404(project_id)
+    json_p = storage.transcription_json_path(project_id)
+    if not json_p.exists():
+        raise HTTPException(status_code=404, detail="Project has not been transcribed yet")
+    return FileResponse(path=str(json_p), media_type="application/json", filename="transcription.json")
