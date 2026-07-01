@@ -18,6 +18,39 @@ import {
 import StatusBadge from "@/components/StatusBadge";
 import NotePreview from "@/components/NotePreview";
 
+const ACCEPTED_EXTENSIONS = [
+  ".wav",
+  ".mp3",
+  ".flac",
+  ".ogg",
+  ".m4a",
+  ".aiff",
+  ".aif",
+];
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+
+function TestFilesNote() {
+  return (
+    <div className="rounded border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+      <p className="font-medium">What works best</p>
+      <ul className="mt-1 list-disc pl-5">
+        <li>
+          A single melody line — one voice or one instrument at a time
+          (singing, whistling, a flute, a piano playing one note at a time).
+        </li>
+        <li>
+          Full songs with drums and many instruments won&apos;t transcribe
+          well yet.
+        </li>
+        <li>
+          .wav, .flac and .ogg files always work; .mp3 and .m4a also work if
+          the server has ffmpeg installed. Maximum size 50MB.
+        </li>
+      </ul>
+    </div>
+  );
+}
+
 export default function ProjectDetailPage() {
   const params = useParams<{ id: string }>();
   const projectId = params.id;
@@ -28,9 +61,11 @@ export default function ProjectDetailPage() {
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [replacingAudio, setReplacingAudio] = useState(false);
 
   const [transcribing, setTranscribing] = useState(false);
   const [transcribeError, setTranscribeError] = useState<string | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
   const [notes, setNotes] = useState<NotesResponse | null>(null);
   const [notesError, setNotesError] = useState<string | null>(null);
@@ -93,10 +128,45 @@ export default function ProjectDetailPage() {
     };
   }, [project?.status, projectId]);
 
+  // Ticks a visible elapsed-time counter while transcription is in flight.
+  // The counter is reset in handleTranscribe, not here, so the effect only
+  // manages the interval.
+  useEffect(() => {
+    if (!transcribing) {
+      return;
+    }
+    const interval = setInterval(
+      () => setElapsedSeconds((s) => s + 1),
+      1000
+    );
+    return () => clearInterval(interval);
+  }, [transcribing]);
+
   async function handleUpload(e: React.FormEvent) {
     e.preventDefault();
     if (!file) {
       setUploadError("Choose an audio file first.");
+      return;
+    }
+    // Instant client-side checks so the user isn't left waiting for the
+    // server to reject an obviously wrong file.
+    const lowerName = file.name.toLowerCase();
+    if (!ACCEPTED_EXTENSIONS.some((ext) => lowerName.endsWith(ext))) {
+      setUploadError(
+        `"${file.name}" doesn't look like a supported audio file. Please choose a file ending in ${ACCEPTED_EXTENSIONS.join(", ")}.`
+      );
+      return;
+    }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setUploadError(
+        `"${file.name}" is ${(file.size / (1024 * 1024)).toFixed(0)}MB, which is over the 50MB limit. Try a shorter recording, or export it as .mp3 to make it smaller.`
+      );
+      return;
+    }
+    if (file.size === 0) {
+      setUploadError(
+        `"${file.name}" is empty (0 bytes). Please pick the audio file again.`
+      );
       return;
     }
     setUploading(true);
@@ -104,9 +174,17 @@ export default function ProjectDetailPage() {
     try {
       const updated = await uploadAudio(projectId, file);
       setProject(updated);
+      // A new file makes any previous results and errors stale.
+      setNotes(null);
+      setNotesError(null);
+      setTranscribeError(null);
+      setFile(null);
+      setReplacingAudio(false);
     } catch (err) {
       setUploadError(
-        err instanceof ApiError ? err.message : "Failed to upload audio."
+        err instanceof ApiError
+          ? err.message
+          : "Uploading failed — check that the backend is still running, then try again."
       );
     } finally {
       setUploading(false);
@@ -114,6 +192,7 @@ export default function ProjectDetailPage() {
   }
 
   async function handleTranscribe() {
+    setElapsedSeconds(0);
     setTranscribing(true);
     setTranscribeError(null);
     try {
@@ -121,7 +200,9 @@ export default function ProjectDetailPage() {
       setProject(updated);
     } catch (err) {
       setTranscribeError(
-        err instanceof ApiError ? err.message : "Failed to transcribe audio."
+        err instanceof ApiError
+          ? err.message
+          : "Transcription was interrupted — check that the backend is still running, then try again."
       );
       // The backend may still have flipped status to "failed"; refetch to
       // stay in sync either way.
@@ -130,6 +211,98 @@ export default function ProjectDetailPage() {
       setTranscribing(false);
     }
   }
+
+  const showUploadForm =
+    project?.status === "created" || replacingAudio;
+
+  const uploadForm = (
+    <section className="rounded border border-gray-200 p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-lg font-medium">
+          {replacingAudio ? "Upload a different file" : "Upload audio"}
+        </h2>
+        {replacingAudio && (
+          <button
+            type="button"
+            onClick={() => {
+              setReplacingAudio(false);
+              setUploadError(null);
+              setFile(null);
+            }}
+            disabled={uploading}
+            className="text-sm text-gray-500 hover:underline disabled:opacity-50"
+          >
+            Cancel
+          </button>
+        )}
+      </div>
+      <div className="mb-3">
+        <TestFilesNote />
+      </div>
+      <form onSubmit={handleUpload} className="flex flex-col gap-3">
+        <input
+          type="file"
+          accept={ACCEPTED_EXTENSIONS.join(",")}
+          onChange={(e) => {
+            setFile(e.target.files?.[0] ?? null);
+            setUploadError(null);
+          }}
+          className="text-sm"
+          disabled={uploading}
+        />
+        <button
+          type="submit"
+          disabled={uploading}
+          className="flex w-fit items-center gap-2 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {uploading && (
+            <span
+              className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"
+              aria-hidden
+            />
+          )}
+          {uploading ? "Uploading…" : "Upload Audio"}
+        </button>
+      </form>
+      {uploading && (
+        <p className="mt-2 text-sm text-gray-500">
+          Sending {file?.name} to the server — large files can take a moment.
+        </p>
+      )}
+      {uploadError && (
+        <p className="mt-2 rounded border border-red-200 bg-red-50 p-2 text-sm text-red-700">
+          {uploadError}
+        </p>
+      )}
+    </section>
+  );
+
+  const transcribeProgress = transcribing && (
+    <div className="mt-4 flex items-center gap-3 rounded border border-yellow-200 bg-yellow-50 p-3">
+      <span
+        className="h-5 w-5 shrink-0 animate-spin rounded-full border-2 border-yellow-600 border-t-transparent"
+        aria-hidden
+      />
+      <p className="text-sm text-yellow-800">
+        Transcribing… {elapsedSeconds}s elapsed. This usually takes a fraction
+        of the recording&apos;s length — a 3-minute song is often done in
+        about a minute. Keep this tab open.
+      </p>
+    </div>
+  );
+
+  const startAgainButton = !transcribing && !replacingAudio && (
+    <button
+      type="button"
+      onClick={() => {
+        setReplacingAudio(true);
+        setUploadError(null);
+      }}
+      className="w-fit rounded border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-50"
+    >
+      Start again with a different file
+    </button>
+  );
 
   if (loadError) {
     return (
@@ -170,68 +343,53 @@ export default function ProjectDetailPage() {
         <StatusBadge status={project.status} />
       </header>
 
-      {project.status === "created" && (
-        <section className="rounded border border-gray-200 p-4">
-          <h2 className="mb-3 text-lg font-medium">Upload audio</h2>
-          <form onSubmit={handleUpload} className="flex flex-col gap-3">
-            <input
-              type="file"
-              accept=".wav,.mp3,.flac,.ogg,.m4a,.aiff,.aif"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-              className="text-sm"
-              disabled={uploading}
-            />
-            <button
-              type="submit"
-              disabled={uploading}
-              className="w-fit rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {uploading ? "Uploading…" : "Upload Audio"}
-            </button>
-          </form>
-          {uploadError && (
-            <p className="mt-2 text-sm text-red-600">{uploadError}</p>
-          )}
-        </section>
-      )}
+      {showUploadForm && uploadForm}
 
-      {project.status === "uploaded" && (
+      {project.status === "uploaded" && !replacingAudio && (
         <section className="rounded border border-gray-200 p-4">
-          <h2 className="mb-3 text-lg font-medium">Audio</h2>
+          <h2 className="mb-1 text-lg font-medium">Audio</h2>
+          {project.audio_filename && (
+            <p className="mb-3 text-xs text-gray-500">
+              File: {project.audio_filename}
+            </p>
+          )}
           <audio controls src={audioUrl(projectId)} className="w-full">
             Your browser does not support the audio element.
           </audio>
-          <button
-            type="button"
-            onClick={handleTranscribe}
-            disabled={transcribing}
-            className="mt-4 w-fit rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {transcribing ? "Transcribing…" : "Run Transcription"}
-          </button>
-          {transcribing && (
-            <p className="mt-2 text-sm text-gray-500">
-              Running real ML inference — this can take a little while for
-              longer audio files. Please don&apos;t close this tab.
-            </p>
-          )}
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={handleTranscribe}
+              disabled={transcribing}
+              className="w-fit rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {transcribing ? "Transcribing…" : "Run Transcription"}
+            </button>
+            {startAgainButton}
+          </div>
+          {transcribeProgress}
           {transcribeError && (
-            <p className="mt-2 text-sm text-red-600">{transcribeError}</p>
+            <p className="mt-2 rounded border border-red-200 bg-red-50 p-2 text-sm text-red-700">
+              {transcribeError}
+            </p>
           )}
         </section>
       )}
 
-      {project.status === "transcribing" && (
+      {project.status === "transcribing" && !transcribing && (
         <section className="flex items-center gap-3 rounded border border-yellow-200 bg-yellow-50 p-4">
           <span
             className="h-5 w-5 animate-spin rounded-full border-2 border-yellow-600 border-t-transparent"
             aria-hidden
           />
-          <p className="text-sm text-yellow-800">Transcription in progress…</p>
+          <p className="text-sm text-yellow-800">
+            Transcription in progress… Reload this page in a little while to
+            see the result.
+          </p>
         </section>
       )}
 
-      {project.status === "failed" && (
+      {project.status === "failed" && !replacingAudio && (
         <section className="rounded border border-red-200 bg-red-50 p-4">
           <h2 className="mb-2 text-lg font-medium text-red-800">
             Transcription failed
@@ -241,21 +399,25 @@ export default function ProjectDetailPage() {
               {project.error}
             </p>
           )}
-          <button
-            type="button"
-            onClick={handleTranscribe}
-            disabled={transcribing}
-            className="w-fit rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {transcribing ? "Retrying…" : "Retry Transcription"}
-          </button>
-          {transcribeError && (
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={handleTranscribe}
+              disabled={transcribing}
+              className="w-fit rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {transcribing ? "Retrying…" : "Retry Transcription"}
+            </button>
+            {startAgainButton}
+          </div>
+          {transcribeProgress}
+          {transcribeError && !transcribing && (
             <p className="mt-2 text-sm text-red-600">{transcribeError}</p>
           )}
         </section>
       )}
 
-      {project.status === "transcribed" && (
+      {project.status === "transcribed" && !replacingAudio && (
         <section className="flex flex-col gap-4">
           <div className="flex items-center gap-4">
             <audio controls src={audioUrl(projectId)} className="w-full">
@@ -263,7 +425,7 @@ export default function ProjectDetailPage() {
             </audio>
           </div>
 
-          <div className="flex gap-4">
+          <div className="flex flex-wrap gap-4">
             <a
               href={midiDownloadUrl(projectId)}
               download
@@ -278,6 +440,7 @@ export default function ProjectDetailPage() {
             >
               Download JSON
             </a>
+            {startAgainButton}
           </div>
 
           {notesError && (
@@ -290,7 +453,19 @@ export default function ProjectDetailPage() {
             <p className="text-sm text-gray-500">Loading notes…</p>
           )}
 
-          {notes && (
+          {notes && notes.note_count === 0 && (
+            <div className="rounded border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800">
+              <p className="font-medium">No notes were detected.</p>
+              <p className="mt-1">
+                This usually means the recording was too quiet, too noisy, or
+                not a single melody line. Try a recording of one voice or one
+                instrument on its own, then use &quot;Start again with a
+                different file&quot;.
+              </p>
+            </div>
+          )}
+
+          {notes && notes.note_count > 0 && (
             <>
               <div>
                 <h2 className="mb-2 text-lg font-medium">

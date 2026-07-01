@@ -45,6 +45,25 @@ def _get_project_or_404(project_id: str) -> Project:
     return project
 
 
+def _friendly_transcription_error(exc: Exception) -> str:
+    """Translate common failure modes into messages a non-technical user can act on."""
+    raw = str(exc) or exc.__class__.__name__
+    name = exc.__class__.__name__
+    if name == "NoBackendError" or "audioread" in raw or "LibsndfileError" in name:
+        return (
+            "Couldn't read this audio file. It may be damaged, or — if it's an .mp3 or "
+            ".m4a — the server may be missing ffmpeg (see the README's troubleshooting "
+            "section). .wav, .flac and .ogg files work without ffmpeg. Try uploading "
+            "the file again, or a different format."
+        )
+    if isinstance(exc, MemoryError):
+        return "The computer ran out of memory while transcribing. Try a shorter recording."
+    return (
+        f"Transcription failed unexpectedly ({raw}). "
+        "Try running it again, or upload the file afresh."
+    )
+
+
 @app.post("/api/projects", response_model=Project, status_code=201)
 def create_project(body: ProjectCreate) -> Project:
     project_id = storage.new_project_id()
@@ -83,17 +102,28 @@ async def upload_audio(project_id: str, file: UploadFile = File(...)) -> Project
     safe_name = Path(original_name).name
     ext = Path(safe_name).suffix.lower()
     if ext not in ALLOWED_AUDIO_EXTENSIONS:
+        received = f"a '{ext}' file" if ext else "a file with no extension"
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported file extension '{ext}'. Accepted: "
-            + ", ".join(sorted(ALLOWED_AUDIO_EXTENSIONS)),
+            detail=f"That file type isn't supported (you uploaded {received}). "
+            "Please choose an audio file ending in: "
+            + ", ".join(sorted(ALLOWED_AUDIO_EXTENSIONS))
+            + ".",
         )
 
     contents = await file.read()
     if len(contents) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=400, detail="File exceeds 50MB limit")
+        size_mb = len(contents) / (1024 * 1024)
+        raise HTTPException(
+            status_code=400,
+            detail=f"This file is {size_mb:.0f}MB, which is over the 50MB limit. "
+            "Try a shorter recording, or export it as .mp3 to make it smaller.",
+        )
     if len(contents) == 0:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+        raise HTTPException(
+            status_code=400,
+            detail="The uploaded file is empty (0 bytes). Please pick the audio file again.",
+        )
 
     a_dir = storage.audio_dir(project_id)
     a_dir.mkdir(parents=True, exist_ok=True)
@@ -107,8 +137,14 @@ async def upload_audio(project_id: str, file: UploadFile = File(...)) -> Project
     saved_path = a_dir / saved_filename
     saved_path.write_bytes(contents)
 
+    # Clear outputs from any earlier transcription so stale notes/MIDI from a
+    # previous file are never served for the new audio.
+    storage.midi_path(project_id).unlink(missing_ok=True)
+    storage.transcription_json_path(project_id).unlink(missing_ok=True)
+
     project.audio_filename = saved_filename
     project.status = "uploaded"
+    project.note_count = None
     project.updated_at = storage.now_iso()
     project.error = None
     storage.save_project(project)
@@ -141,11 +177,12 @@ def transcribe(project_id: str) -> Project:
             source_audio_filename=project.audio_filename,
         )
     except Exception as exc:  # noqa: BLE001
+        message = _friendly_transcription_error(exc)
         project.status = "failed"
-        project.error = str(exc)
+        project.error = message
         project.updated_at = storage.now_iso()
         storage.save_project(project)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail=message) from exc
 
     project.status = "transcribed"
     project.note_count = result["note_count"]
