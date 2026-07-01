@@ -1,3 +1,20 @@
+# ---- Python (backend) ----
+# Unanchored patterns match at any level: ".venv/" also covers
+# "backend/.venv/", "__pycache__/" covers "backend/app/__pycache__/", etc.
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# ---- App runtime data (uploaded audio + generated outputs) ----
+backend/storage/
+backend/uploads/
+backend/outputs/
+
+# ---- Node/Next.js (also covered further down; repeated here for clarity) ----
+node_modules/
+.next/
+
 # Logs
 logs
 *.log
