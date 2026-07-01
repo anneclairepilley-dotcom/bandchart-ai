@@ -26,25 +26,7 @@ echo
 
 echo "Checking prerequisites..."
 
-# Basic Pitch's transcription engine (TensorFlow) only supports Python 3.9-3.11 —
-# newer Macs often ship/install a newer default python3, so find a compatible one.
-PYTHON_BIN=""
-for candidate in python3.11 python3.10 python3.9 python3; do
-  if command -v "$candidate" >/dev/null 2>&1; then
-    ver="$("$candidate" -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")' 2>/dev/null)"
-    [ -z "$ver" ] && continue
-    major="${ver%%.*}"; minor="${ver#*.}"
-    if [ "$major" = "3" ] && [ "$minor" -ge 9 ] 2>/dev/null && [ "$minor" -le 11 ] 2>/dev/null; then
-      PYTHON_BIN="$candidate"
-      break
-    fi
-  fi
-done
-if [ -z "$PYTHON_BIN" ]; then
-  fail "Couldn't find a compatible Python (need 3.9–3.11; TensorFlow doesn't support newer versions yet). Install it with: brew install python@3.11 — then run setup.command again."
-fi
-echo "Using $PYTHON_BIN ($("$PYTHON_BIN" --version 2>&1))"
-
+command -v python3 >/dev/null 2>&1 || fail "Python 3 is not installed. Double-click check.command to see how to install it."
 command -v node >/dev/null 2>&1 || fail "Node.js is not installed. Double-click check.command to see how to install it."
 command -v npm  >/dev/null 2>&1 || fail "npm is not installed. Double-click check.command to see how to install it."
 if ! command -v ffmpeg >/dev/null 2>&1; then
@@ -54,10 +36,10 @@ fi
 echo -e "${GREEN}Prerequisites OK.${NC}"
 echo
 
-echo "Setting up the backend (this downloads TensorFlow — it can take several minutes on a first run, that's normal)..."
+echo "Setting up the backend (installs librosa and other Python packages — a minute or two on a first run)..."
 cd backend || fail "Could not find the backend folder. Make sure this script is inside the bandchart-ai project folder."
 if [ ! -d ".venv" ]; then
-  "$PYTHON_BIN" -m venv .venv || fail "Could not create a Python virtual environment."
+  python3 -m venv .venv || fail "Could not create a Python virtual environment."
 fi
 ./.venv/bin/pip install --upgrade pip >/dev/null 2>&1
 ./.venv/bin/pip install -r requirements.txt || fail "Installing backend dependencies failed. Check your internet connection and try running setup.command again."

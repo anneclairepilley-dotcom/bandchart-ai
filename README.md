@@ -5,14 +5,20 @@ AI music arranging and rehearsal app that turns songs into editable lead sheets,
 ## v0.1 — Transcription Prototype
 
 This is the smallest possible working prototype: a local web app where you upload an audio
-file and the backend runs **real audio-to-MIDI transcription** using Spotify's open-source
-[Basic Pitch](https://github.com/spotify/basic-pitch) model. Everything runs on your own
-computer — no accounts, no payments, no cloud services, no data leaves your machine.
+file and the backend runs **real audio-to-pitch transcription** using
+[librosa](https://librosa.org/)'s pYIN algorithm. Everything runs on your own computer — no
+accounts, no payments, no cloud services, no data leaves your machine.
+
+pYIN is a genuine, well-established pitch-tracking algorithm — it follows one melodic line at
+a time (monophonic: a single voice, vocal line, or solo instrument, not full chords). It was
+chosen over deep-learning models like Basic Pitch/TensorFlow because it's pure Python/numpy —
+no TensorFlow — so it installs reliably everywhere, including GitHub Codespaces and other
+environments with newer Python versions.
 
 **What it does:**
 - Create a project
 - Upload an audio file (wav, mp3, flac, ogg, m4a, aiff)
-- Run real ML-based transcription on the uploaded audio (Basic Pitch / TensorFlow, runs on CPU)
+- Run real pitch-tracking transcription on the uploaded audio (librosa pYIN, runs on CPU, no GPU/TensorFlow needed)
 - Generate a MIDI file and a JSON file listing every detected note (pitch, start time, duration, confidence)
 - Preview the transcription in the browser (simple piano-roll + note table)
 - Download the MIDI and JSON files
@@ -41,9 +47,9 @@ Fix anything marked `[MISSING]`, then run it again until everything says `[OK]`.
 
 **Step 2 — Set everything up.** Double-click **`setup.command`**.
 
-This installs everything the app needs, including TensorFlow (the machine-learning library
-Basic Pitch runs on) — that download can take **several minutes** the first time. Let it run
-until it says "Setup complete!". It's safe to run again later if anything seems broken.
+This installs everything the app needs (librosa and the other Python/Node packages) — the
+first run can take a minute or two. Let it run until it says "Setup complete!". It's safe to
+run again later if anything seems broken.
 
 **Step 3 — Start the app.** Double-click **`start.command`**.
 
@@ -63,22 +69,64 @@ That's it. Create a project, upload a song, click "Run Transcription", and downl
 
 ---
 
+## Quick Start (GitHub Codespaces) — no coding required
+
+Codespaces gives you a Linux terminal in your browser — paste these commands into it one
+block at a time and press Enter after each.
+
+**1. Get the latest code** (skip this if you just opened a brand-new Codespace):
+```bash
+git pull
+```
+
+**2. Set up and start the backend:**
+```bash
+cd backend
+rm -rf .venv
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+Leave this running. Codespaces will pop up a notification offering to open port 8000 — you
+can ignore/dismiss it, the frontend will talk to it automatically.
+
+**3. Open a second terminal** (click the `+` in the terminal panel, or menu **Terminal → New
+Terminal**) and start the frontend:
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+**4. Open the app.** Click the **Ports** tab (next to the Terminal tab), find port **3000**,
+and click the globe/open-in-browser icon next to it — or Codespaces may pop up a "your
+application running on port 3000" notification with an **Open in Browser** button.
+
+That's it. Create a project, upload a song, click "Run Transcription", and download the results.
+
+> **Getting `ffmpeg: command not found`, or mp3/m4a files fail to transcribe:** run
+> `sudo apt-get update && sudo apt-get install -y ffmpeg` in the terminal, then try again.
+> (wav/flac/ogg files work without ffmpeg.)
+
+---
+
 ## Manual setup (Windows / Linux / advanced users)
 
-The double-click scripts above are macOS-only. On any other platform, or if you'd rather run
-things yourself, follow these steps.
+The double-click scripts above are macOS-only, and the Codespaces steps assume a browser
+terminal. On any other platform, or if you'd rather run things yourself, follow these steps.
 
-Requires **Python 3.9–3.11** (TensorFlow, which Basic Pitch depends on, doesn't yet support
-newer Python versions) and **Node.js 18+**. Install `ffmpeg` too if you want to transcribe
+Requires **Python 3.9+** and **Node.js 18+**. Install `ffmpeg` too if you want to transcribe
 compressed formats like mp3/m4a (wav/flac/ogg work without it).
 
-### 1. Backend (FastAPI + Basic Pitch)
+### 1. Backend (FastAPI + librosa)
 
 ```bash
 cd backend
 python3 -m venv .venv
 source .venv/bin/activate      # Windows: .venv\Scripts\activate
-pip install -r requirements.txt   # pulls in TensorFlow, can take several minutes
+pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
@@ -104,14 +152,25 @@ need to point it elsewhere.
 1. Open http://localhost:3000
 2. Create a project, giving it a name
 3. Upload an audio file
-4. Click "Run Transcription" and wait for it to finish (real model inference — a few seconds
-   to a couple of minutes depending on file length and your machine)
+4. Click "Run Transcription" and wait for it to finish (real pitch-tracking analysis — a few
+   seconds to a minute or so depending on file length and your machine)
 5. View the note preview, and download the `.mid` and `.json` files
+
+## Troubleshooting
+
+**`ModuleNotFoundError: No module named 'distutils'` during `pip install`.** This happened
+with the earlier version of this project, which used Basic Pitch/TensorFlow — TensorFlow
+doesn't support the newer Python versions that ship by default in environments like GitHub
+Codespaces, and installing it could fall back to a build process that needed the `distutils`
+module Python removed in 3.12+. The app no longer uses Basic Pitch/TensorFlow at all (see
+above), so this shouldn't happen anymore. If you still hit it: make sure you have the latest
+code (`git pull`), delete any old virtual environment (`rm -rf backend/.venv`), and reinstall
+following the steps above.
 
 ## Architecture
 
 ```
-backend/    FastAPI service — local JSON-file project storage, Basic Pitch transcription
+backend/    FastAPI service — local JSON-file project storage, librosa pYIN transcription
 frontend/   Next.js app — upload UI, transcription preview, downloads
 ```
 
@@ -138,5 +197,5 @@ All endpoints are under `/api`.
 | GET | `/projects/{id}/download/json` | Download the generated notes JSON file |
 
 Each note in the JSON output has: `pitch` (MIDI number), `pitch_name` (e.g. `"C4"`),
-`start_time` (seconds), `duration` (seconds), and `confidence` (0–1, derived from Basic
-Pitch's note amplitude estimate).
+`start_time` (seconds), `duration` (seconds), and `confidence` (0–1, pYIN's voiced-pitch
+probability for that note, averaged over its frames).
