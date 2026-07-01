@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from app import storage
 from app.models import Project, ProjectCreate
+from app.musicxml import INSTRUMENTS, notes_to_musicxml
 from app.transcription import run_transcription
 
 app = FastAPI(title="BandChart AI Backend", version="0.1.0")
@@ -137,10 +138,13 @@ async def upload_audio(project_id: str, file: UploadFile = File(...)) -> Project
     saved_path = a_dir / saved_filename
     saved_path.write_bytes(contents)
 
-    # Clear outputs from any earlier transcription so stale notes/MIDI from a
-    # previous file are never served for the new audio.
-    storage.midi_path(project_id).unlink(missing_ok=True)
-    storage.transcription_json_path(project_id).unlink(missing_ok=True)
+    # Clear outputs from any earlier transcription (notes JSON, MIDI, any
+    # generated MusicXML) so stale results are never served for the new audio.
+    out_dir = storage.output_dir(project_id)
+    if out_dir.exists():
+        for stale in out_dir.iterdir():
+            if stale.is_file():
+                stale.unlink()
 
     project.audio_filename = saved_filename
     project.status = "uploaded"
@@ -231,3 +235,38 @@ def download_json(project_id: str) -> FileResponse:
     if not json_p.exists():
         raise HTTPException(status_code=404, detail="Project has not been transcribed yet")
     return FileResponse(path=str(json_p), media_type="application/json", filename="transcription.json")
+
+
+@app.get("/api/projects/{project_id}/download/musicxml")
+def download_musicxml(project_id: str, instrument: str = "concert") -> FileResponse:
+    project = _get_project_or_404(project_id)
+    if instrument not in INSTRUMENTS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown instrument '{instrument}'. Valid choices: "
+            + ", ".join(sorted(INSTRUMENTS)),
+        )
+    json_p = storage.transcription_json_path(project_id)
+    if not json_p.exists():
+        raise HTTPException(status_code=404, detail="Project has not been transcribed yet")
+
+    data = json.loads(json_p.read_text())
+    out_p = storage.musicxml_path(project_id, instrument)
+    try:
+        notes_to_musicxml(
+            notes=data["notes"],
+            instrument_key=instrument,
+            project_name=project.name,
+            out_path=out_p,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=500,
+            detail=f"Couldn't create the MusicXML file ({exc}). Try re-running the transcription.",
+        ) from exc
+
+    return FileResponse(
+        path=str(out_p),
+        media_type="application/vnd.recordare.musicxml+xml",
+        filename=out_p.name,
+    )

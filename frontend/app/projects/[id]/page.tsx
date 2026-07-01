@@ -10,11 +10,13 @@ import {
   getProject,
   jsonDownloadUrl,
   midiDownloadUrl,
+  musicxmlDownloadUrl,
   transcribeProject,
   uploadAudio,
   type NotesResponse,
   type Project,
 } from "@/lib/api";
+import { INSTRUMENTS, midiNoteName } from "@/lib/instruments";
 import StatusBadge from "@/components/StatusBadge";
 import NotePreview from "@/components/NotePreview";
 
@@ -69,6 +71,10 @@ export default function ProjectDetailPage() {
 
   const [notes, setNotes] = useState<NotesResponse | null>(null);
   const [notesError, setNotesError] = useState<string | null>(null);
+
+  const [instrumentKey, setInstrumentKey] = useState("concert");
+  const selectedInstrument =
+    INSTRUMENTS.find((i) => i.key === instrumentKey) ?? INSTRUMENTS[0];
 
   // Reusable refetch for event handlers (e.g. re-syncing status after a
   // transcribe attempt). Not called directly from an effect body.
@@ -425,6 +431,32 @@ export default function ProjectDetailPage() {
             </audio>
           </div>
 
+          <div className="rounded border border-gray-200 p-4">
+            <label
+              htmlFor="instrument"
+              className="mb-1 block text-sm font-medium"
+            >
+              Solo instrument
+            </label>
+            <select
+              id="instrument"
+              value={instrumentKey}
+              onChange={(e) => setInstrumentKey(e.target.value)}
+              className="rounded border border-gray-300 px-3 py-2 text-sm"
+            >
+              {INSTRUMENTS.map((inst) => (
+                <option key={inst.key} value={inst.key}>
+                  {inst.label}
+                </option>
+              ))}
+            </select>
+            <p className="mt-2 text-xs text-gray-500">
+              {selectedInstrument.writtenOffset > 0
+                ? `${selectedInstrument.label} is a transposing instrument — its written part is ${selectedInstrument.writtenOffset} semitones above the detected concert pitch. The note table and MusicXML download below use the written pitch.`
+                : "This instrument reads at concert pitch, so written and detected pitches are the same."}
+            </p>
+          </div>
+
           <div className="flex flex-wrap gap-4">
             <a
               href={midiDownloadUrl(projectId)}
@@ -439,6 +471,13 @@ export default function ProjectDetailPage() {
               className="rounded border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-50"
             >
               Download JSON
+            </a>
+            <a
+              href={musicxmlDownloadUrl(projectId, instrumentKey)}
+              download
+              className="rounded border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-50"
+            >
+              Download MusicXML ({selectedInstrument.label})
             </a>
             {startAgainButton}
           </div>
@@ -480,7 +519,10 @@ export default function ProjectDetailPage() {
                   <table className="w-full text-left text-sm">
                     <thead className="sticky top-0 bg-gray-50">
                       <tr>
-                        <th className="p-2 font-medium">Pitch</th>
+                        <th className="p-2 font-medium">Concert pitch</th>
+                        <th className="p-2 font-medium">
+                          Written ({selectedInstrument.label})
+                        </th>
                         <th className="p-2 font-medium">Start (s)</th>
                         <th className="p-2 font-medium">Duration (s)</th>
                         <th className="p-2 font-medium">Confidence</th>
@@ -493,6 +535,11 @@ export default function ProjectDetailPage() {
                           className="border-t border-gray-100 odd:bg-white even:bg-gray-50"
                         >
                           <td className="p-2">{note.pitch_name}</td>
+                          <td className="p-2">
+                            {midiNoteName(
+                              note.pitch + selectedInstrument.writtenOffset
+                            )}
+                          </td>
                           <td className="p-2">{note.start_time.toFixed(3)}</td>
                           <td className="p-2">{note.duration.toFixed(3)}</td>
                           <td className="p-2">
