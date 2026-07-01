@@ -90,7 +90,8 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 Leave this running. Codespaces will pop up a notification offering to open port 8000 — you
-can ignore/dismiss it, the frontend will talk to it automatically.
+can ignore/dismiss it. The app talks to the backend through the frontend's own server, so
+port 8000 never needs to be opened or made public.
 
 **3. Open a second terminal** (click the `+` in the terminal panel, or menu **Terminal → New
 Terminal**) and start the frontend:
@@ -143,9 +144,10 @@ npm install
 npm run dev
 ```
 
-The app runs at http://localhost:3000. By default it talks to the backend at
-`http://localhost:8000` — copy `frontend/.env.local.example` to `frontend/.env.local` if you
-need to point it elsewhere.
+The app runs at http://localhost:3000. The frontend's own server proxies all `/api` requests
+to the backend at `http://localhost:8000`, so no extra configuration is needed — copy
+`frontend/.env.local.example` to `frontend/.env.local` only if your backend runs somewhere
+else.
 
 ### 3. Use it
 
@@ -157,6 +159,14 @@ need to point it elsewhere.
 5. View the note preview, and download the `.mid` and `.json` files
 
 ## Troubleshooting
+
+**"Could not reach the backend" error in the app.** Two usual causes: (1) the backend isn't
+running — check the terminal where you started `uvicorn`; it should say
+`Uvicorn running on http://0.0.0.0:8000` with no errors above it. (2) You're on old code —
+run `git pull` in the project folder, then stop the frontend (Ctrl+C in its terminal) and
+start it again with `npm run dev`. Older versions made the browser call the backend's port
+directly, which fails in Codespaces; the current version routes everything through the
+frontend server.
 
 **`ModuleNotFoundError: No module named 'distutils'` during `pip install`.** This happened
 with the earlier version of this project, which used Basic Pitch/TensorFlow — TensorFlow
