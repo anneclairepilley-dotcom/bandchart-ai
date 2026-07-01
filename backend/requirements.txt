@@ -1,5 +1,7 @@
 fastapi
 uvicorn[standard]
 python-multipart
-basic-pitch
+librosa
+soundfile
+numpy
 pretty_midi
