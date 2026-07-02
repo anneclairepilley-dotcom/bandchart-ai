@@ -2,6 +2,10 @@ import type { Note } from "@/lib/api";
 
 interface NotePreviewProps {
   notes: Note[];
+  /** Play-along playhead position in seconds; null/undefined hides it. */
+  playheadTime?: number | null;
+  /** Index of the currently sounding note during play-along. */
+  currentNoteIndex?: number | null;
 }
 
 const PX_PER_SECOND = 60;
@@ -14,7 +18,11 @@ const PADDING_Y = 16;
  * x axis = time in seconds, y axis = MIDI pitch (higher pitch drawn higher
  * on screen). One <rect> per note; opacity scales with confidence.
  */
-export default function NotePreview({ notes }: NotePreviewProps) {
+export default function NotePreview({
+  notes,
+  playheadTime = null,
+  currentNoteIndex = null,
+}: NotePreviewProps) {
   if (notes.length === 0) {
     return (
       <div className="rounded border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500">
@@ -108,6 +116,7 @@ export default function NotePreview({ notes }: NotePreviewProps) {
           const x = PADDING_X + note.start_time * PX_PER_SECOND;
           const w = Math.max(2, note.duration * PX_PER_SECOND);
           const y = pitchToY(note.pitch);
+          const isCurrent = i === currentNoteIndex;
           return (
             <rect
               key={i}
@@ -116,8 +125,8 @@ export default function NotePreview({ notes }: NotePreviewProps) {
               width={w}
               height={ROW_HEIGHT - 1}
               rx={1}
-              fill="#2563eb"
-              fillOpacity={0.15 + confidence * 0.75}
+              fill={isCurrent ? "#ea580c" : "#2563eb"}
+              fillOpacity={isCurrent ? 1 : 0.15 + confidence * 0.75}
             >
               <title>
                 {note.pitch_name} @ {note.start_time.toFixed(2)}s for{" "}
@@ -127,6 +136,19 @@ export default function NotePreview({ notes }: NotePreviewProps) {
             </rect>
           );
         })}
+
+        {/* Play-along playhead */}
+        {playheadTime !== null && playheadTime !== undefined && (
+          <line
+            x1={PADDING_X + playheadTime * PX_PER_SECOND}
+            x2={PADDING_X + playheadTime * PX_PER_SECOND}
+            y1={PADDING_Y - 6}
+            y2={height - PADDING_Y + 8}
+            stroke="#ea580c"
+            strokeWidth={1.5}
+            data-testid="playhead"
+          />
+        )}
       </svg>
     </div>
   );

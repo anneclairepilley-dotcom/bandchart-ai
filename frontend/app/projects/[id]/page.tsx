@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
@@ -21,6 +21,57 @@ import {
 import { INSTRUMENTS, midiNoteName } from "@/lib/instruments";
 import StatusBadge from "@/components/StatusBadge";
 import NotePreview from "@/components/NotePreview";
+import PlayAlong from "@/components/PlayAlong";
+import type { Note } from "@/lib/api";
+
+// Memoized so the 60fps play-along position updates don't re-render every
+// table row; the current-note index only changes when the note changes.
+const NoteTable = memo(function NoteTable({
+  notes,
+  writtenLabel,
+  writtenOffset,
+  currentIndex,
+}: {
+  notes: Note[];
+  writtenLabel: string;
+  writtenOffset: number;
+  currentIndex: number | null;
+}) {
+  return (
+    <div className="max-h-96 overflow-y-auto rounded border border-gray-200">
+      <table className="w-full text-left text-sm">
+        <thead className="sticky top-0 bg-gray-50">
+          <tr>
+            <th className="p-2 font-medium">Concert pitch</th>
+            <th className="p-2 font-medium">Written ({writtenLabel})</th>
+            <th className="p-2 font-medium">Start (s)</th>
+            <th className="p-2 font-medium">Duration (s)</th>
+            <th className="p-2 font-medium">Confidence</th>
+          </tr>
+        </thead>
+        <tbody>
+          {notes.map((note, i) => (
+            <tr
+              key={i}
+              data-playing={i === currentIndex ? "true" : undefined}
+              className={
+                i === currentIndex
+                  ? "border-t border-orange-200 bg-orange-100"
+                  : "border-t border-gray-100 odd:bg-white even:bg-gray-50"
+              }
+            >
+              <td className="p-2">{note.pitch_name}</td>
+              <td className="p-2">{midiNoteName(note.pitch + writtenOffset)}</td>
+              <td className="p-2">{note.start_time.toFixed(3)}</td>
+              <td className="p-2">{note.duration.toFixed(3)}</td>
+              <td className="p-2">{(note.confidence * 100).toFixed(0)}%</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+});
 
 const ACCEPTED_EXTENSIONS = [
   ".wav",
@@ -82,6 +133,16 @@ export default function ProjectDetailPage() {
 
   const [pdfDownloading, setPdfDownloading] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
+
+  const [playPosition, setPlayPosition] = useState<number | null>(null);
+  const [playNoteIndex, setPlayNoteIndex] = useState<number | null>(null);
+  const handlePlayTick = useCallback(
+    (position: number | null, noteIndex: number | null) => {
+      setPlayPosition(position);
+      setPlayNoteIndex(noteIndex);
+    },
+    []
+  );
 
   async function handlePdfDownload() {
     setPdfDownloading(true);
@@ -588,50 +649,27 @@ export default function ProjectDetailPage() {
 
           {notes && notes.note_count > 0 && (
             <>
+              <PlayAlong notes={notes.notes} onTick={handlePlayTick} />
+
               <div>
                 <h2 className="mb-2 text-lg font-medium">
                   Transcription preview ({notes.note_count} notes)
                 </h2>
-                <NotePreview notes={notes.notes} />
+                <NotePreview
+                  notes={notes.notes}
+                  playheadTime={playPosition}
+                  currentNoteIndex={playNoteIndex}
+                />
               </div>
 
               <div>
                 <h2 className="mb-2 text-lg font-medium">Note detail</h2>
-                <div className="max-h-96 overflow-y-auto rounded border border-gray-200">
-                  <table className="w-full text-left text-sm">
-                    <thead className="sticky top-0 bg-gray-50">
-                      <tr>
-                        <th className="p-2 font-medium">Concert pitch</th>
-                        <th className="p-2 font-medium">
-                          Written ({selectedInstrument.label})
-                        </th>
-                        <th className="p-2 font-medium">Start (s)</th>
-                        <th className="p-2 font-medium">Duration (s)</th>
-                        <th className="p-2 font-medium">Confidence</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {notes.notes.map((note, i) => (
-                        <tr
-                          key={i}
-                          className="border-t border-gray-100 odd:bg-white even:bg-gray-50"
-                        >
-                          <td className="p-2">{note.pitch_name}</td>
-                          <td className="p-2">
-                            {midiNoteName(
-                              note.pitch + selectedInstrument.writtenOffset
-                            )}
-                          </td>
-                          <td className="p-2">{note.start_time.toFixed(3)}</td>
-                          <td className="p-2">{note.duration.toFixed(3)}</td>
-                          <td className="p-2">
-                            {(note.confidence * 100).toFixed(0)}%
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <NoteTable
+                  notes={notes.notes}
+                  writtenLabel={selectedInstrument.label}
+                  writtenOffset={selectedInstrument.writtenOffset}
+                  currentIndex={playNoteIndex}
+                />
               </div>
             </>
           )}
