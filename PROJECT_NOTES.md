@@ -77,6 +77,17 @@ Not decided; the owner has hinted YouTube import is next on their wish list, but
 approved yet — ask before building it. (Long-term list also: full band charts, rehearsal
 packs, tabs; see out-of-scope below.)
 
+### v0.5.7 — safe project deletion (done)
+- `DELETE /api/projects/{id}` removes the project's whole storage folder
+  (`storage/projects/<id>/` — audio, outputs, metadata) via `storage.delete_project`,
+  which refuses any path that doesn't resolve to a direct child of storage/projects/
+  (defense-in-depth against traversal); 404 for unknown ids, friendly 500 detail on failure
+- Dashboard: red Delete button per row (outside the row's Link so clicks don't navigate),
+  native `window.confirm` with the agreed wording, optimistic list removal on success,
+  error banner on failure, per-row "Deleting…" disabled state
+- No note-count/other side effects — deletion is whole-project only; note-level deletes
+  remain the v0.5.5 ✕/reset feature
+
 ### v0.5.6 — sheet music as the main play-along surface (done)
 - OSMD now draws TWO simultaneous cursors (`cursorsOptions` in the constructor):
   type 3 "current measure" wash (orange, alpha 0.12) + type 0 "current notes" box
@@ -169,6 +180,10 @@ Next.js proxy, plus confirmed by the owner in Codespaces:
   resume continues; stop resets and clears highlights; 2s of wall clock advances the
   transport ~2s at 100% vs ~1s at 50%; count-in holds transport at 0 for the first ~2s;
   auto-stop fires at the end; all six download endpoints still 200 afterwards
+- v0.5.7 delete: confirmation shows the exact agreed wording; cancel keeps the project;
+  confirm removes it from the list immediately and survives a page refresh; the storage
+  folder is gone from disk; other projects (sheet, downloads) unaffected; deleting an
+  unknown id returns 404
 - v0.5.6: both cursors render as real boxes (40px tall) at the start before playback,
   move across systems during playback, the sheet auto-scrolls when the cursor leaves a
   shortened viewport, pause freezes and stop returns the cursors to the start (visible);

@@ -96,6 +96,19 @@ def get_project(project_id: str) -> Project:
     return _get_project_or_404(project_id)
 
 
+@app.delete("/api/projects/{project_id}")
+def delete_project(project_id: str) -> JSONResponse:
+    _get_project_or_404(project_id)
+    try:
+        storage.delete_project(project_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=500,
+            detail=f"Couldn't delete the project ({exc}). Try again.",
+        ) from exc
+    return JSONResponse(content={"deleted": project_id})
+
+
 @app.post("/api/projects/{project_id}/audio", response_model=Project)
 async def upload_audio(project_id: str, file: UploadFile = File(...)) -> Project:
     project = _get_project_or_404(project_id)

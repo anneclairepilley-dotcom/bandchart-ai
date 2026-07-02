@@ -12,6 +12,7 @@ Layout:
 from __future__ import annotations
 
 import json
+import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -116,6 +117,18 @@ def list_projects() -> list[Project]:
                 continue
     projects.sort(key=lambda p: p.created_at, reverse=True)
     return projects
+
+
+def delete_project(project_id: str) -> None:
+    """Remove one project's folder (its audio, outputs and metadata) — and
+    nothing else. Refuses any path that doesn't resolve to a directory
+    directly inside storage/projects/."""
+    root = PROJECTS_ROOT.resolve()
+    target = project_dir(project_id).resolve()
+    if target == root or target.parent != root:
+        raise ValueError("Refusing to delete outside the projects folder")
+    if target.exists():
+        shutil.rmtree(target)
 
 
 def find_existing_audio(project_id: str) -> Optional[Path]:

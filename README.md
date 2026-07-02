@@ -47,6 +47,8 @@ environments with newer Python versions.
 - **Delete wrong notes**: a ✕ button on each row of the note table removes a misdetected
   note — the preview, playback, sheet music and every download update automatically, and
   "Reset to original transcription" undoes all edits
+- **Delete projects**: a Delete button beside each project on the dashboard removes the
+  project with its uploaded audio and generated files, after a confirmation prompt
 
 **Explicitly out of scope so far:** accounts, payments, full band charts, rehearsal packs,
 PDF export, YouTube support, complex editing, stem separation, drums, chord detection.
@@ -237,6 +239,17 @@ contain the untouched detection regardless of the style toggle.
 | --- | --- | --- |
 | Save edited notes | PUT | `/api/projects/{id}/notes` |
 | Undo all edits | POST | `/api/projects/{id}/notes/reset` |
+| Delete a project | DELETE | `/api/projects/{id}` |
+
+### Deleting a project (beginner steps)
+
+1. Go back to the project list (the "← Back to projects" link, or open http://localhost:3000)
+2. Every project row has a red **Delete** button on the right
+3. Click it — a confirmation appears: *"Delete this transcription? This will remove its
+   uploaded audio and generated files."* Cancel keeps everything; OK deletes the project,
+   its uploaded audio, and all its generated files (JSON, MIDI, MusicXML, PDF)
+4. Deletion is permanent — there's no undo — but it only ever touches that one project's
+   own storage folder, never the app itself or your other projects
 
 ## Troubleshooting
 
