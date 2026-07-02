@@ -24,3 +24,12 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Tailwind's preflight sets img { height: auto }, which collapses
+   OpenSheetMusicDisplay's cursor overlay images (1px source images sized
+   via their height attribute) into invisible hairlines. Restore the
+   browser-default attribute-driven sizing for cursors inside the sheet. */
+[data-testid="sheet-scrollbox"] img[id^="cursor"] {
+  height: revert;
+  max-width: none;
+}

@@ -20,6 +20,22 @@ interface SheetMusicProps {
 const SECONDS_PER_WHOLE_NOTE = 2;
 
 /**
+ * OSMD sizes its cursor overlays with width/height ATTRIBUTES on 1px-tall
+ * images; Tailwind's preflight (img { height: auto }) collapses them into
+ * invisible hairlines. Inline styles beat the reset, so re-apply the
+ * attribute sizes after every cursor move.
+ */
+function fixCursorSize(cursor: { cursorElement?: HTMLImageElement }) {
+  const el = cursor.cursorElement;
+  if (!el) return;
+  const h = el.getAttribute("height");
+  const w = el.getAttribute("width");
+  if (h) el.style.height = `${h}px`;
+  if (w) el.style.width = `${w}px`;
+  el.style.maxWidth = "none";
+}
+
+/**
  * Renders the generated MusicXML in the browser with OpenSheetMusicDisplay
  * and steps OSMD's cursor along during play-along. The cursor follows the
  * quantized beat grid of the engraved sheet, so it can differ slightly from
@@ -79,30 +95,42 @@ export default function SheetMusic({
           drawComposer: false,
           drawCredits: false,
           drawPartNames: true,
+          // Two simultaneous cursors, Songsterr-style: a soft wash over the
+          // whole current measure plus a stronger box on the current notes.
+          cursorsOptions: [
+            { type: 3, color: "#f97316", alpha: 0.12, follow: false },
+            { type: 0, color: "#f97316", alpha: 0.45, follow: false },
+          ],
         });
         await osmd.load(xml);
         if (cancelled) return;
         osmd.render();
         osmdRef.current = osmd;
 
-        // Walk the cursor once to collect every entry's timestamp so playback
-        // can jump the cursor to the right step deterministically.
+        // Walk one cursor once to collect every entry's timestamp so playback
+        // can jump the cursors to the right step deterministically.
         const times: number[] = [];
-        const cursor = osmd.cursor;
-        cursor.show();
-        cursor.reset();
+        const walker = osmd.cursors[0];
+        walker.show();
+        walker.reset();
         let guard = 0;
-        while (!cursor.Iterator.EndReached && guard < 10000) {
+        while (!walker.Iterator.EndReached && guard < 10000) {
           times.push(
-            cursor.Iterator.currentTimeStamp.RealValue * SECONDS_PER_WHOLE_NOTE
+            walker.Iterator.currentTimeStamp.RealValue * SECONDS_PER_WHOLE_NOTE
           );
-          cursor.next();
+          walker.next();
           guard += 1;
         }
-        cursor.reset();
-        cursor.hide();
+        // Park every cursor visibly at the start — the user should always
+        // see where playback will begin on the sheet.
+        for (const cursor of osmd.cursors) {
+          cursor.show();
+          cursor.reset();
+          cursor.update();
+          fixCursorSize(cursor);
+        }
         entryTimesRef.current = times;
-        cursorStepRef.current = -1;
+        cursorStepRef.current = 0;
         setResult({ key: depsKey, state: "ready" });
       } catch (err) {
         if (!cancelled) {
@@ -124,49 +152,48 @@ export default function SheetMusic({
     };
   }, [projectId, instrumentKey, sheetStyle, notesVersion, depsKey]);
 
-  // Follow the play-along transport with OSMD's cursor.
+  // Follow the play-along transport with OSMD's cursors. When playback is
+  // stopped (position null) the cursors return to the start and stay visible.
   useEffect(() => {
     const osmd = osmdRef.current;
     if (!osmd || loadState !== "ready") return;
-    const cursor = osmd.cursor;
+    const cursors = osmd.cursors;
     const times = entryTimesRef.current;
 
-    if (playPosition === null) {
-      if (cursorStepRef.current !== -1) {
-        cursor.reset();
-        cursor.hide();
-        cursorStepRef.current = -1;
+    // Target: the last entry at or before the transport position, or the
+    // very first entry when stopped.
+    let target = 0;
+    if (playPosition !== null) {
+      for (let i = 0; i < times.length; i++) {
+        if (times[i] <= playPosition + 1e-6) target = i;
+        else break;
       }
-      return;
     }
-
-    // Target: the last entry at or before the transport position.
-    let target = -1;
-    for (let i = 0; i < times.length; i++) {
-      if (times[i] <= playPosition + 1e-6) target = i;
-      else break;
-    }
-    if (target < 0) target = 0;
     if (target === cursorStepRef.current) return;
 
-    if (cursorStepRef.current === -1) {
-      cursor.show();
-    }
-    if (target < cursorStepRef.current || cursorStepRef.current === -1) {
-      cursor.reset();
+    if (target < cursorStepRef.current) {
+      for (const cursor of cursors) {
+        cursor.reset();
+      }
       cursorStepRef.current = 0;
     }
     let guard = 0;
     while (cursorStepRef.current < target && guard < 10000) {
-      cursor.next();
+      for (const cursor of cursors) {
+        cursor.next();
+      }
       cursorStepRef.current += 1;
       guard += 1;
     }
-    cursor.update();
+    for (const cursor of cursors) {
+      cursor.update();
+      fixCursorSize(cursor);
+    }
 
-    if (autoScroll && cursor.cursorElement && scrollBoxRef.current) {
+    const noteCursor = cursors[cursors.length - 1];
+    if (autoScroll && noteCursor.cursorElement && scrollBoxRef.current) {
       const box = scrollBoxRef.current;
-      const cursorTop = cursor.cursorElement.offsetTop;
+      const cursorTop = noteCursor.cursorElement.offsetTop;
       const viewTop = box.scrollTop;
       const viewBottom = viewTop + box.clientHeight;
       if (cursorTop < viewTop + 40 || cursorTop > viewBottom - 80) {
@@ -195,14 +222,15 @@ export default function SheetMusic({
       )}
       <div
         ref={scrollBoxRef}
-        className="max-h-[420px] overflow-y-auto rounded border border-gray-200 bg-white p-2"
+        className="max-h-[600px] overflow-y-auto rounded border border-gray-200 bg-white p-2"
         data-testid="sheet-scrollbox"
       >
         <div ref={containerRef} />
       </div>
       <p className="mt-1 text-xs text-gray-500">
-        The cursor follows the sheet&apos;s beat grid, so it can sit slightly
-        off the literal recording timing.
+        The orange box marks the current notes and the lighter wash the
+        current bar. The cursor follows the sheet&apos;s beat grid, so it can
+        sit slightly off the literal recording timing.
       </p>
     </div>
   );

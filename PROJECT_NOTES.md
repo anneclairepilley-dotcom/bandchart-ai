@@ -77,6 +77,24 @@ Not decided; the owner has hinted YouTube import is next on their wish list, but
 approved yet — ask before building it. (Long-term list also: full band charts, rehearsal
 packs, tabs; see out-of-scope below.)
 
+### v0.5.6 — sheet music as the main play-along surface (done)
+- OSMD now draws TWO simultaneous cursors (`cursorsOptions` in the constructor):
+  type 3 "current measure" wash (orange, alpha 0.12) + type 0 "current notes" box
+  (orange, alpha 0.45). Both are stepped together in the follow effect
+- Cursors are parked VISIBLY at the first entry when the sheet loads and whenever
+  playback stops (position null → step 0, no more hide()); pause freezes them in place
+- **Gotcha (hard-won)**: OSMD sizes cursor overlays via width/height ATTRIBUTES on
+  1px-tall <img> elements; Tailwind preflight's `img { height: auto }` collapses them to
+  invisible hairlines (this was why the v0.5.5 cursor felt like it "didn't follow").
+  CSS `height: revert` does NOT fix it (presentational hints are skipped by revert);
+  the fix is `fixCursorSize()` in SheetMusic.tsx re-applying inline style.height/width
+  after every cursor show/update — keep calling it after each move
+- Sheet box grew to max-h 600px; the piano roll moved into a collapsed
+  `<details>` "Advanced note timeline" so the score is the primary surface
+- Follow-along granularity is note-entry level on the quantized sheet (stated in the UI);
+  true beat-accurate sync to the literal recording timing would need per-note mapping
+  between raw times and engraved positions — a possible future refinement
+
 ### v0.5.5 — Play Along fixes (done)
 - **Softer playback voices** (`PlayAlong.tsx` `scheduleNoteSound`): Piano-ish default
   (triangle + octave sine, percussive decay, lowpass), Soft synth (detuned sines, slow
@@ -151,6 +169,10 @@ Next.js proxy, plus confirmed by the owner in Codespaces:
   resume continues; stop resets and clears highlights; 2s of wall clock advances the
   transport ~2s at 100% vs ~1s at 50%; count-in holds transport at 0 for the first ~2s;
   auto-stop fires at the end; all six download endpoints still 200 afterwards
+- v0.5.6: both cursors render as real boxes (40px tall) at the start before playback,
+  move across systems during playback, the sheet auto-scrolls when the cursor leaves a
+  shortened viewport, pause freezes and stop returns the cursors to the start (visible);
+  PUT/reset note edits and all download endpoints re-verified after the layout change
 - v0.5.5: OSMD sheet renders (svg) with cursor visible and moving during playback;
   deleting a note updates table rows, preview rects, JSON note_count, MIDI note count
   (pretty_midi round-trip), MusicXML and project.note_count; reset restores; auto-scroll

@@ -778,17 +778,19 @@ export default function ProjectDetailPage() {
                 />
               </div>
 
-              <div>
-                <h2 className="mb-2 text-lg font-medium">
-                  Transcription preview ({workingNotes.length} notes)
-                </h2>
-                <NotePreview
-                  notes={workingNotes}
-                  playheadTime={playPosition}
-                  currentNoteIndex={playNoteIndex}
-                  autoScroll={autoScroll}
-                />
-              </div>
+              <details className="rounded border border-gray-200 p-3">
+                <summary className="cursor-pointer text-sm font-medium text-gray-700">
+                  Advanced note timeline ({workingNotes.length} notes)
+                </summary>
+                <div className="mt-3">
+                  <NotePreview
+                    notes={workingNotes}
+                    playheadTime={playPosition}
+                    currentNoteIndex={playNoteIndex}
+                    autoScroll={autoScroll}
+                  />
+                </div>
+              </details>
 
               <div>
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
