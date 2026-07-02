@@ -38,8 +38,10 @@ environments with newer Python versions.
 - **Three playback sounds** — Piano-ish (default), Soft synth, Pluck — softer little
   synthesizer voices instead of harsh beeps
 - **Sheet music in the browser**: the generated notation renders right on the project page
-  (via OpenSheetMusicDisplay), for the selected instrument and style, with a cursor that
-  follows along during playback
+  (via OpenSheetMusicDisplay), for the selected instrument and style — and it's the main
+  play-along surface: an orange box highlights the current notes, a lighter wash marks the
+  current bar, the cursor sits visibly at the start before you play, returns there on
+  Stop, and the sheet auto-scrolls to keep the current bar in view
 - **Auto-scroll** (on by default, toggleable): the sheet music, piano roll and note table
   keep the current note in view while playing
 - **Delete wrong notes**: a ✕ button on each row of the note table removes a misdetected
@@ -210,9 +212,10 @@ contain the untouched detection regardless of the style toggle.
 ### Trying Play Along (beginner steps)
 
 1. Open a transcribed project and find the **Play Along** panel (below the download buttons)
-2. Click **Play** — after the optional 4-click count-in you'll hear the detected notes as
-   simple synthesized tones, with the sounding note highlighted in the piano roll and the
-   note table, and a moving playhead line
+2. Click **Play** — after the optional 4-click count-in you'll hear the detected notes,
+   and the **sheet music follows along**: the orange box moves note to note, the light
+   wash tracks the current bar, and the score scrolls itself. (The note table highlights
+   too, and a piano-roll view lives under "Advanced note timeline" if you want it.)
 3. **Pause** freezes playback where it is; pressing **Play** again continues from there;
    **Stop** resets to the beginning
 4. Try the speed buttons — **50%** and **75%** are handy for practising along slowly;
