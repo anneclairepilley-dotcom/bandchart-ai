@@ -6,3 +6,6 @@ soundfile
 numpy
 pretty_midi
 music21
+verovio
+cairosvg
+pypdf

@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from app import storage
 from app.models import Project, ProjectCreate
 from app.musicxml import INSTRUMENTS, notes_to_musicxml
+from app.pdf import musicxml_to_pdf
 from app.transcription import run_transcription
 
 app = FastAPI(title="BandChart AI Backend", version="0.1.0")
@@ -237,8 +238,8 @@ def download_json(project_id: str) -> FileResponse:
     return FileResponse(path=str(json_p), media_type="application/json", filename="transcription.json")
 
 
-@app.get("/api/projects/{project_id}/download/musicxml")
-def download_musicxml(project_id: str, instrument: str = "concert") -> FileResponse:
+def _generate_musicxml_or_error(project_id: str, instrument: str) -> Path:
+    """Validate instrument + transcription state and (re)generate the MusicXML file."""
     project = _get_project_or_404(project_id)
     if instrument not in INSTRUMENTS:
         raise HTTPException(
@@ -264,9 +265,33 @@ def download_musicxml(project_id: str, instrument: str = "concert") -> FileRespo
             status_code=500,
             detail=f"Couldn't create the MusicXML file ({exc}). Try re-running the transcription.",
         ) from exc
+    return out_p
 
+
+@app.get("/api/projects/{project_id}/download/musicxml")
+def download_musicxml(project_id: str, instrument: str = "concert") -> FileResponse:
+    out_p = _generate_musicxml_or_error(project_id, instrument)
     return FileResponse(
         path=str(out_p),
         media_type="application/vnd.recordare.musicxml+xml",
         filename=out_p.name,
+    )
+
+
+@app.get("/api/projects/{project_id}/download/pdf")
+def download_pdf(project_id: str, instrument: str = "concert") -> FileResponse:
+    musicxml_p = _generate_musicxml_or_error(project_id, instrument)
+    pdf_p = storage.pdf_path(project_id, instrument)
+    try:
+        musicxml_to_pdf(musicxml_p, pdf_p)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=500,
+            detail=f"Couldn't create the PDF ({exc}). The MusicXML download should still "
+            "work — you can open that in MuseScore instead, or try the PDF again.",
+        ) from exc
+    return FileResponse(
+        path=str(pdf_p),
+        media_type="application/pdf",
+        filename=pdf_p.name,
     )

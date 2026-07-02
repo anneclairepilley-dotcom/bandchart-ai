@@ -15,7 +15,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from music21 import clef, instrument, meter, note, stream, tempo
+from music21 import clef, instrument, metadata, meter, note, stream, tempo
 
 TEMPO_BPM = 120
 SECONDS_PER_QUARTER = 60 / TEMPO_BPM
@@ -91,7 +91,7 @@ def notes_to_musicxml(
     part.insert(0, clef.bestClef(part, recurse=True))
 
     score = stream.Score()
-    score.metadata = None
+    score.metadata = metadata.Metadata(title=f"{project_name} — {spec['label']}")
     score.insert(0, part)
     score.makeNotation(inPlace=True)
 

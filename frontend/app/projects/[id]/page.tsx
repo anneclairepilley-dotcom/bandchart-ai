@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import {
   ApiError,
   audioUrl,
+  fetchPdf,
   getNotes,
   getProject,
   jsonDownloadUrl,
@@ -75,6 +76,33 @@ export default function ProjectDetailPage() {
   const [instrumentKey, setInstrumentKey] = useState("concert");
   const selectedInstrument =
     INSTRUMENTS.find((i) => i.key === instrumentKey) ?? INSTRUMENTS[0];
+
+  const [pdfDownloading, setPdfDownloading] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
+
+  async function handlePdfDownload() {
+    setPdfDownloading(true);
+    setPdfError(null);
+    try {
+      const blob = await fetchPdf(projectId, instrumentKey);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `transcription-${instrumentKey.replace(/_/g, "-")}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setPdfError(
+        err instanceof ApiError
+          ? err.message
+          : "Couldn't download the PDF. Check that the backend is still running, then try again."
+      );
+    } finally {
+      setPdfDownloading(false);
+    }
+  }
 
   // Reusable refetch for event handlers (e.g. re-syncing status after a
   // transcribe attempt). Not called directly from an effect body.
@@ -479,8 +507,30 @@ export default function ProjectDetailPage() {
             >
               Download MusicXML ({selectedInstrument.label})
             </a>
+            <button
+              type="button"
+              onClick={handlePdfDownload}
+              disabled={pdfDownloading}
+              className="flex items-center gap-2 rounded border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {pdfDownloading && (
+                <span
+                  className="h-4 w-4 animate-spin rounded-full border-2 border-gray-500 border-t-transparent"
+                  aria-hidden
+                />
+              )}
+              {pdfDownloading
+                ? "Preparing PDF…"
+                : `Download PDF (${selectedInstrument.label})`}
+            </button>
             {startAgainButton}
           </div>
+
+          {pdfError && (
+            <p className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              {pdfError}
+            </p>
+          )}
 
           {notesError && (
             <p className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
