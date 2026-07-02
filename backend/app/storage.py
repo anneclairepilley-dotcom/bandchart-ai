@@ -61,6 +61,10 @@ def musicxml_path(project_id: str, instrument_key: str) -> Path:
     return output_dir(project_id) / f"transcription-{instrument_key.replace('_', '-')}.musicxml"
 
 
+def pdf_path(project_id: str, instrument_key: str) -> Path:
+    return output_dir(project_id) / f"transcription-{instrument_key.replace('_', '-')}.pdf"
+
+
 def project_exists(project_id: str) -> bool:
     return project_json_path(project_id).exists()
 

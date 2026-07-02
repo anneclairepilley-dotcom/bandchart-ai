@@ -153,3 +153,39 @@ export function musicxmlDownloadUrl(
 ): string {
   return `${API_BASE_URL}/api/projects/${projectId}/download/musicxml?instrument=${encodeURIComponent(instrumentKey)}`;
 }
+
+/**
+ * Fetch the PDF sheet music for a solo instrument as a Blob.
+ *
+ * Unlike the other downloads this goes through fetch rather than a plain
+ * link: PDF generation can fail server-side, and a fetch lets the UI show
+ * the backend's error message instead of a broken tab.
+ */
+export async function fetchPdf(
+  projectId: string,
+  instrumentKey: string
+): Promise<Blob> {
+  const url = `${API_BASE_URL}/api/projects/${projectId}/download/pdf?instrument=${encodeURIComponent(instrumentKey)}`;
+  let response: Response;
+  try {
+    response = await fetch(url);
+  } catch {
+    throw new ApiError(
+      "Could not reach the backend. Is the backend server running on port 8000?"
+    );
+  }
+  if (!response.ok) {
+    let detail: string | undefined;
+    try {
+      const body = await response.json();
+      detail = typeof body?.detail === "string" ? body.detail : undefined;
+    } catch {
+      // non-JSON error body; fall through to the generic message
+    }
+    throw new ApiError(
+      detail || `PDF download failed: ${response.status} ${response.statusText}`,
+      response.status
+    );
+  }
+  return response.blob();
+}

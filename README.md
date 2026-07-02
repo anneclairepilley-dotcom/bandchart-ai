@@ -2,7 +2,7 @@
 
 AI music arranging and rehearsal app that turns songs into editable lead sheets, solo sheets, band charts and custom arrangements.
 
-## v0.2 — Transcription + Solo Parts
+## v0.3 — Transcription + Solo Parts + PDF Sheet Music
 
 This is the smallest possible working prototype: a local web app where you upload an audio
 file and the backend runs **real audio-to-pitch transcription** using
@@ -24,9 +24,10 @@ environments with newer Python versions.
 - Pick a solo instrument (concert pitch, piano, flute, violin, alto sax, tenor sax, trumpet,
   clarinet) — the note table shows both the detected concert pitch and the written pitch,
   transposed for E♭/B♭ instruments
-- Download MIDI, JSON, and MusicXML (sheet music that opens in
-  [MuseScore](https://musescore.org) and similar apps, written for the chosen instrument;
-  rhythm is intentionally rough for now — fixed 120 BPM, notes snapped to a sixteenth grid)
+- Download MIDI, JSON, MusicXML (sheet music that opens in
+  [MuseScore](https://musescore.org) and similar apps), and **PDF sheet music** — all
+  written for the chosen instrument; rhythm is intentionally rough for now (fixed 120 BPM,
+  notes snapped to a sixteenth grid)
 
 **Explicitly out of scope so far:** accounts, payments, full band charts, rehearsal packs,
 PDF export, YouTube support, complex editing, stem separation, drums, chord detection.
@@ -160,14 +161,31 @@ else.
 3. Upload an audio file
 4. Click "Run Transcription" and wait for it to finish (real pitch-tracking analysis — a few
    seconds to a minute or so depending on file length and your machine)
-5. View the note preview, pick a solo instrument, and download the `.mid`, `.json` and
-   `.musicxml` files
+5. View the note preview, pick a solo instrument, and download the `.mid`, `.json`,
+   `.musicxml` and `.pdf` files
 
 > **Updating from an older version?** After `git pull`, run
 > `pip install -r requirements.txt` in the backend once more (with the virtual environment
-> active) — v0.2 adds the `music21` library for MusicXML export.
+> active) — newer versions add libraries (music21 for MusicXML, verovio/cairosvg/pypdf for
+> PDF export).
+
+### Trying the PDF export (beginner steps)
+
+1. Open a project that has finished transcribing (status "transcribed")
+2. Pick an instrument from the **Solo instrument** dropdown — e.g. *Alto Sax (E♭)*
+3. Click **Download PDF (Alto Sax (E♭))**. The button shows "Preparing PDF…" for a few
+   seconds while the sheet music is engraved, then the file lands in your Downloads folder
+4. Open it with any PDF viewer (double-click it — no special software needed). You should
+   see a titled page of real notation, transposed for the instrument you picked
+5. If something goes wrong, a red message appears under the buttons telling you what to do —
+   the MusicXML download keeps working either way
 
 ## Troubleshooting
+
+**PDF download fails with a message about "cairo".** The PDF engine uses a system library
+called cairo that is preinstalled in GitHub Codespaces and on most computers. If it's
+missing, run `sudo apt-get update && sudo apt-get install -y libcairo2` in the terminal,
+restart the backend, and try again. The MusicXML download works regardless.
 
 **"Could not reach the backend" error in the app.** Two usual causes: (1) the backend isn't
 running — check the terminal where you started `uvicorn`; it should say
@@ -215,6 +233,7 @@ All endpoints are under `/api`.
 | GET | `/projects/{id}/download/midi` | Download the generated MIDI file |
 | GET | `/projects/{id}/download/json` | Download the generated notes JSON file |
 | GET | `/projects/{id}/download/musicxml?instrument=<key>` | Download MusicXML for a solo instrument — keys: `concert`, `piano`, `flute`, `violin`, `alto_sax`, `tenor_sax`, `trumpet`, `clarinet` |
+| GET | `/projects/{id}/download/pdf?instrument=<key>` | Download PDF sheet music for a solo instrument (same keys) |
 
 Each note in the JSON output has: `pitch` (MIDI number), `pitch_name` (e.g. `"C4"`),
 `start_time` (seconds), `duration` (seconds), and `confidence` (0–1, pYIN's voiced-pitch

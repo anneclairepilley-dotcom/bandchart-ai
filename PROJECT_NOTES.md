@@ -37,14 +37,26 @@ Explanations, error messages, and README instructions must stay beginner-friendl
 - Frontend: instrument dropdown on transcribed projects, note table shows
   **concert pitch + written pitch** columns, MusicXML download button follows selection
 
-### v0.3 — planned next
-**PDF sheet music export from MusicXML.** Not started. Notes for the implementer:
-- MuseScore CLI (`mscore -o out.pdf in.musicxml`) is the usual high-quality route but is a
-  heavy install for Codespaces; LilyPond (via `music21` → `lilypond`) or `verovio`
-  (pip-installable, SVG→PDF) are lighter options — evaluate `verovio` first
-- Keep the existing MusicXML pipeline as the source; PDF should be derived from it
-- Same delivery pattern: endpoint `GET /api/projects/{id}/download/pdf?instrument=<key>`,
-  file saved in outputs folder, download button follows the instrument selector
+### v0.3 — PDF sheet music export (done)
+- `backend/app/pdf.py`: MusicXML → verovio (SVG pages) → cairosvg (per-page PDF) → pypdf
+  merge. All pip-installable; cairosvg needs the libcairo2 system library (present in
+  Codespaces/most Linux; README has a troubleshooting entry). Imports are lazy so a missing
+  library fails only the PDF request, never backend startup
+- Endpoint: `GET /api/projects/{id}/download/pdf?instrument=<key>` (same keys as MusicXML);
+  saves `output/transcription-<instrument>.pdf`; derived from the MusicXML pipeline
+- **Gotcha (hard-won)**: verovio toolkits must NOT be created per request — font loading
+  breaks after a few instantiations across FastAPI's worker threads. `pdf.py` keeps one
+  lazy singleton toolkit behind a `threading.Lock`; keep it that way
+- Metronome `<direction>` elements are stripped before engraving (their note glyph needs a
+  music text font cairosvg can't load → renders as a box); the .musicxml keeps the tempo
+- v0.2 improvement ride-along: MusicXML/PDF now carry a real title
+  ("<project name> — <instrument>") instead of music21's "Music21 Fragment" default
+- Frontend: "Download PDF (<instrument>)" button follows the selector; uses fetch + blob
+  (not a plain link) so PDF failures show the backend's friendly message in a red box
+
+### v0.4 — planned next
+Not decided. Ask the owner. (Their long-term list: full band charts, rehearsal packs,
+editing — but nothing is approved yet; see out-of-scope below.)
 
 **Still out of scope (owner has said "not yet" repeatedly):** accounts, payments, full band
 charts, rehearsal packs, YouTube, chord detection, stem separation, drums, complex editing,
@@ -58,6 +70,10 @@ Next.js proxy, plus confirmed by the owner in Codespaces:
 - 15MB upload arrives intact; 43-second transcription completes (proxy limits raised)
 - All 8 MusicXML exports parse in music21 round-trip with correct written offsets
   (0 / +9 / +14 / +2) and `<transpose>` only on transposing instruments
+- PDF export: valid `%PDF-` files for all 8 instruments; visually inspected (real engraved
+  notation, correct title/part name, no missing-glyph boxes); 12 sequential + 6 concurrent
+  requests all succeed (singleton-toolkit fix); browser download event fires; simulated
+  500 shows the friendly error in the UI
 - Error paths: bad extension/oversize/empty rejected client-side and server-side with
   friendly messages; stale outputs cleared on re-upload (notes/MIDI/MusicXML 404 after)
 - `tsc --noEmit` and `npm run lint` clean; scripts syntax-checked and exercised
@@ -101,6 +117,7 @@ backend/  FastAPI (Python 3.9+; owner's Codespace uses 3.12)
   app/main.py           all routes under /api; friendly error mapping
   app/transcription.py  pYIN engine — DO NOT swap without explicit request
   app/musicxml.py       music21 export + INSTRUMENTS table
+  app/pdf.py            verovio/cairosvg/pypdf PDF engraving (singleton toolkit + lock)
   app/storage.py        storage/projects/<id>/{project.json,audio/,output/}
 frontend/ Next.js 16 (app router, Tailwind, TypeScript)
   app/page.tsx                  project list/create
