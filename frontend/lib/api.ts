@@ -109,6 +109,13 @@ export function getProject(projectId: string): Promise<Project> {
   return request<Project>(`/api/projects/${projectId}`);
 }
 
+/** Permanently delete a project and its uploaded audio + generated files. */
+export function deleteProject(projectId: string): Promise<{ deleted: string }> {
+  return request<{ deleted: string }>(`/api/projects/${projectId}`, {
+    method: "DELETE",
+  });
+}
+
 export function uploadAudio(
   projectId: string,
   file: File

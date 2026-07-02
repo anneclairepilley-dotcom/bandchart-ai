@@ -3,7 +3,13 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ApiError, createProject, listProjects, type Project } from "@/lib/api";
+import {
+  ApiError,
+  createProject,
+  deleteProject,
+  listProjects,
+  type Project,
+} from "@/lib/api";
 import StatusBadge from "@/components/StatusBadge";
 
 export default function HomePage() {
@@ -14,6 +20,32 @@ export default function HomePage() {
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  async function handleDelete(project: Project) {
+    const confirmed = window.confirm(
+      "Delete this transcription? This will remove its uploaded audio and generated files."
+    );
+    if (!confirmed) return;
+    setDeletingId(project.id);
+    setDeleteError(null);
+    try {
+      await deleteProject(project.id);
+      setProjects((current) =>
+        current ? current.filter((p) => p.id !== project.id) : current
+      );
+    } catch (err) {
+      setDeleteError(
+        err instanceof ApiError
+          ? err.message
+          : `Couldn't delete "${project.name}" — check that the backend is running, then try again.`
+      );
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -106,13 +138,22 @@ export default function HomePage() {
           <p className="text-sm text-gray-500">No projects yet.</p>
         )}
 
+        {deleteError && (
+          <p className="mb-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            {deleteError}
+          </p>
+        )}
+
         {!loadError && projects !== null && projects.length > 0 && (
           <ul className="flex flex-col divide-y divide-gray-200 rounded border border-gray-200">
             {projects.map((project) => (
-              <li key={project.id}>
+              <li
+                key={project.id}
+                className="flex items-center gap-2 pr-3 hover:bg-gray-50"
+              >
                 <Link
                   href={`/projects/${project.id}`}
-                  className="flex items-center justify-between gap-4 p-3 hover:bg-gray-50"
+                  className="flex flex-1 items-center justify-between gap-4 p-3"
                 >
                   <div className="flex flex-col">
                     <span className="font-medium">{project.name}</span>
@@ -122,6 +163,15 @@ export default function HomePage() {
                   </div>
                   <StatusBadge status={project.status} />
                 </Link>
+                <button
+                  type="button"
+                  onClick={() => handleDelete(project)}
+                  disabled={deletingId === project.id}
+                  data-testid={`delete-project-${project.id}`}
+                  className="shrink-0 rounded border border-red-200 px-3 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {deletingId === project.id ? "Deleting…" : "Delete"}
+                </button>
               </li>
             ))}
           </ul>
