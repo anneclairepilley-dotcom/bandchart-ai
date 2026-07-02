@@ -89,7 +89,7 @@ def _detect_notes(audio_path: Path) -> list[dict[str, Any]]:
     return notes
 
 
-def _write_midi(notes: list[dict[str, Any]], midi_out_path: Path) -> None:
+def write_midi_from_notes(notes: list[dict[str, Any]], midi_out_path: Path) -> None:
     midi = pretty_midi.PrettyMIDI()
     instrument = pretty_midi.Instrument(program=0, name="Transcribed Melody")
     for note in notes:
@@ -120,7 +120,7 @@ def run_transcription(
     Returns the transcription result dict (same shape written to json_out_path).
     """
     notes = _detect_notes(audio_path)
-    _write_midi(notes, midi_out_path)
+    write_midi_from_notes(notes, midi_out_path)
 
     result = {
         "project_id": project_id,

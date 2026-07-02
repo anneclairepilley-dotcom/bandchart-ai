@@ -131,6 +131,29 @@ export function getNotes(projectId: string): Promise<NotesResponse> {
   return request<NotesResponse>(`/api/projects/${projectId}/notes`);
 }
 
+/**
+ * Save an edited note list as the project's working transcription. The
+ * backend rewrites transcription.json and the MIDI file, so every download
+ * (JSON, MIDI, MusicXML, PDF) reflects the edit afterwards.
+ */
+export function updateNotes(
+  projectId: string,
+  notes: Note[]
+): Promise<NotesResponse> {
+  return request<NotesResponse>(`/api/projects/${projectId}/notes`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ notes }),
+  });
+}
+
+/** Restore the untouched original transcription (undo all note edits). */
+export function resetNotes(projectId: string): Promise<NotesResponse> {
+  return request<NotesResponse>(`/api/projects/${projectId}/notes/reset`, {
+    method: "POST",
+  });
+}
+
 /** Direct URL for the HTML5 <audio> player (not fetched via JSON helper). */
 export function audioUrl(projectId: string): string {
   return `${API_BASE_URL}/api/projects/${projectId}/audio`;

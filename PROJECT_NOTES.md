@@ -73,8 +73,36 @@ Explanations, error messages, and README instructions must stay beginner-friendl
 - MIDI/JSON downloads intentionally stay raw — they're the faithful record
 
 ### v0.6 — planned next
-Not decided. Ask the owner. (Their long-term list: full band charts, rehearsal packs,
-editing — but nothing is approved yet; see out-of-scope below.)
+Not decided; the owner has hinted YouTube import is next on their wish list, but it is NOT
+approved yet — ask before building it. (Long-term list also: full band charts, rehearsal
+packs, tabs; see out-of-scope below.)
+
+### v0.5.5 — Play Along fixes (done)
+- **Softer playback voices** (`PlayAlong.tsx` `scheduleNoteSound`): Piano-ish default
+  (triangle + octave sine, percussive decay, lowpass), Soft synth (detuned sines, slow
+  attack), Pluck (fast exponential decay) — plain Web Audio, still no Tone.js
+- **In-browser sheet music** (`frontend/components/SheetMusic.tsx`): OpenSheetMusicDisplay
+  2.0 (npm dep) renders the generated MusicXML (selected instrument + style; re-fetches
+  when notesVersion bumps). Playback cursor: entry timestamps are collected once by
+  walking OSMD's cursor (RealValue whole-notes × 2 = seconds at the fixed 120 BPM), then
+  the cursor jumps deterministically to the last entry ≤ transport position. The cursor
+  follows the quantized beat grid, not literal recording timing — stated in the UI.
+  drawTitle/Subtitle/Composer/Credits all false (OSMD otherwise prints a "Music21" credit)
+- **Auto-scroll** (default on, toggle in the panel, state owned by the page): sheet
+  scrollbox, piano-roll horizontal scroll, and note-table vertical scroll each keep the
+  current position in view; all scroll ONLY their own container, never the page
+- **Note deletion**: ✕ per table row edits a client working copy instantly; a debounced
+  (600ms) auto-save PUTs to `/api/projects/{id}/notes`, which rewrites transcription.json
+  AND regenerates the MIDI — so JSON/MIDI/MusicXML/PDF all reflect edits (MusicXML/PDF
+  generate on demand from transcription.json). `POST /notes/reset` restores
+  `transcription-original.json`, snapshotted at transcribe time. Editing notes stops
+  playback (PlayAlong's cleanup effect keys on `notes`)
+- **More aggressive cleanup** (clean style): min fragment 0.15→0.2s, merge gap
+  0.12→0.2s, wobble window 0.15→0.22s, plus a second smooth+merge pass to catch
+  cascading wobbles exposed by the first merge
+- **Lint gotcha (recurring)**: react-hooks rules forbid synchronous setState in effect
+  bodies — set state in async callbacks/event handlers, or key derived state on a deps
+  string (see SheetMusic's `depsKey`/`result` pattern)
 
 ### v0.5 — Play Along mode (done)
 - Frontend-only; no backend changes, no new dependencies (plain Web Audio API, no Tone.js)
@@ -123,6 +151,12 @@ Next.js proxy, plus confirmed by the owner in Codespaces:
   resume continues; stop resets and clears highlights; 2s of wall clock advances the
   transport ~2s at 100% vs ~1s at 50%; count-in holds transport at 0 for the first ~2s;
   auto-stop fires at the end; all six download endpoints still 200 afterwards
+- v0.5.5: OSMD sheet renders (svg) with cursor visible and moving during playback;
+  deleting a note updates table rows, preview rects, JSON note_count, MIDI note count
+  (pretty_midi round-trip), MusicXML and project.note_count; reset restores; auto-scroll
+  moves the piano roll during playback and stays put when toggled off; voice selector
+  defaults to Piano-ish; aggressive-cleanup unit cases (0.18s fragment dropped, 0.18s gap
+  merged, 0.2s wobble absorbed, cascading wobble caught); `npm run build` passes with OSMD
 - Error paths: bad extension/oversize/empty rejected client-side and server-side with
   friendly messages; stale outputs cleared on re-upload (notes/MIDI/MusicXML 404 after)
 - `tsc --noEmit` and `npm run lint` clean; scripts syntax-checked and exercised
@@ -176,8 +210,10 @@ backend/  FastAPI (Python 3.9+; owner's Codespace uses 3.12)
   app/storage.py        storage/projects/<id>/{project.json,audio/,output/}
 frontend/ Next.js 16 (app router, Tailwind, TypeScript)
   app/page.tsx                  project list/create
-  app/projects/[id]/page.tsx    the whole project workflow UI (memoized NoteTable inside)
-  components/PlayAlong.tsx      Web Audio play-along engine + panel
+  app/projects/[id]/page.tsx    the whole project workflow UI (memoized NoteTable inside,
+                                note-edit working copy + debounced auto-save)
+  components/PlayAlong.tsx      Web Audio play-along engine + panel (3 synth voices)
+  components/SheetMusic.tsx     OSMD sheet render + playback cursor sync
   lib/api.ts                    typed fetch helpers; API_BASE_URL defaults to "" (same-origin)
   lib/instruments.ts            instrument keys/labels/offsets (mirror of backend)
   next.config.ts                /api rewrite proxy, 60MB body, 10-min timeout,

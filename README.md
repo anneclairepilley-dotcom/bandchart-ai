@@ -2,7 +2,7 @@
 
 AI music arranging and rehearsal app that turns songs into editable lead sheets, solo sheets, band charts and custom arrangements.
 
-## v0.5 — Transcription + Solo Parts + Sheet Music + Play Along
+## v0.5.5 — Transcription + Solo Parts + Sheet Music + Play Along + Editing
 
 This is the smallest possible working prototype: a local web app where you upload an audio
 file and the backend runs **real audio-to-pitch transcription** using
@@ -34,7 +34,17 @@ environments with newer Python versions.
 - **Play Along mode**: hear the transcribed notes in the browser with Play/Pause/Stop, a
   moving playhead and current-note highlighting, playback speeds of 50/75/100/125%, an
   optional 4-click count-in, and a running time display (playback uses the generated
-  transcription, not the original audio — simple synthesized tones, by design)
+  transcription, not the original audio)
+- **Three playback sounds** — Piano-ish (default), Soft synth, Pluck — softer little
+  synthesizer voices instead of harsh beeps
+- **Sheet music in the browser**: the generated notation renders right on the project page
+  (via OpenSheetMusicDisplay), for the selected instrument and style, with a cursor that
+  follows along during playback
+- **Auto-scroll** (on by default, toggleable): the sheet music, piano roll and note table
+  keep the current note in view while playing
+- **Delete wrong notes**: a ✕ button on each row of the note table removes a misdetected
+  note — the preview, playback, sheet music and every download update automatically, and
+  "Reset to original transcription" undoes all edits
 
 **Explicitly out of scope so far:** accounts, payments, full band charts, rehearsal packs,
 PDF export, YouTube support, complex editing, stem separation, drums, chord detection.
@@ -210,6 +220,20 @@ contain the untouched detection regardless of the style toggle.
 5. Remember: playback is the *transcription*, not your recording — if a note sounds wrong
    here, it will also be wrong in the sheet music, which makes this a quick way to check a
    transcription by ear
+
+### Fixing wrong notes (beginner steps)
+
+1. In the **Note detail** table, find the wrongly detected note (playing along and watching
+   the highlight is the easiest way to spot it)
+2. Click the red **✕** at the end of its row — the note disappears from the preview, the
+   sheet music, playback, and all downloads (a "Edits saved" note confirms it)
+3. Deleted too much? Click **Reset to original transcription** to get everything back
+4. The sheet music panel and the downloads always match what's left in the table
+
+| API | Method | Path |
+| --- | --- | --- |
+| Save edited notes | PUT | `/api/projects/{id}/notes` |
+| Undo all edits | POST | `/api/projects/{id}/notes/reset` |
 
 ## Troubleshooting
 
