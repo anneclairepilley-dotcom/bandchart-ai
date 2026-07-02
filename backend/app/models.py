@@ -25,11 +25,17 @@ class ProjectCreate(BaseModel):
 
 
 class Note(BaseModel):
-    pitch: int
+    pitch: int = Field(..., ge=0, le=127)
     pitch_name: str
-    start_time: float
-    duration: float
-    confidence: float
+    start_time: float = Field(..., ge=0)
+    duration: float = Field(..., gt=0)
+    confidence: float = Field(..., ge=0, le=1)
+
+
+class NotesUpdate(BaseModel):
+    """Body of PUT /projects/{id}/notes — the edited working note list."""
+
+    notes: list[Note]
 
 
 class TranscriptionResult(BaseModel):

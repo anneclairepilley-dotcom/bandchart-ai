@@ -34,9 +34,9 @@ Note = dict[str, Any]
 class CleanupSettings:
     tempo_bpm: float = 120.0
     grid_quarters: float = 0.5  # eighth-note grid
-    min_duration_s: float = 0.15  # drop fragments shorter than this
-    merge_gap_s: float = 0.12  # same-pitch notes closer than this merge
-    wobble_max_s: float = 0.15  # notes at most this long can be wobble
+    min_duration_s: float = 0.2  # drop fragments shorter than this
+    merge_gap_s: float = 0.2  # same-pitch notes closer than this merge
+    wobble_max_s: float = 0.22  # notes at most this long can be wobble
     wobble_max_semitones: int = 3  # only nearby pitches count as wobble
 
     @property
@@ -151,9 +151,16 @@ def quantize(notes: list[Note], settings: CleanupSettings) -> list[Note]:
 def clean_notes(
     notes: list[Note], settings: CleanupSettings | None = None
 ) -> list[Note]:
-    """Full cleanup pipeline: wobble -> merge -> drop fragments -> quantize."""
+    """Full cleanup pipeline: wobble -> merge (twice over) -> drop fragments -> quantize.
+
+    Smoothing runs a second time after the first merge: merging can turn a
+    cluster of fragments into a clear neighbour pair, exposing wobbles the
+    first pass couldn't see.
+    """
     settings = settings or CleanupSettings()
     result = smooth_pitch_wobble(notes, settings)
+    result = merge_same_pitch(result, settings)
+    result = smooth_pitch_wobble(result, settings)
     result = merge_same_pitch(result, settings)
     result = drop_fragments(result, settings)
     result = merge_same_pitch(result, settings)  # dropping fragments can expose new gaps

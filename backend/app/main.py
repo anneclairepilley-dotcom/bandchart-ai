@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import shutil
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -11,10 +12,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
 from app import storage
-from app.models import Project, ProjectCreate
+from app.models import NotesUpdate, Project, ProjectCreate
 from app.musicxml import INSTRUMENTS, notes_to_musicxml
 from app.pdf import musicxml_to_pdf
-from app.transcription import run_transcription
+from app.transcription import run_transcription, write_midi_from_notes
 
 app = FastAPI(title="BandChart AI Backend", version="0.1.0")
 
@@ -189,6 +190,12 @@ def transcribe(project_id: str) -> Project:
         storage.save_project(project)
         raise HTTPException(status_code=500, detail=message) from exc
 
+    # Keep an untouched copy so note edits can always be undone.
+    shutil.copyfile(
+        storage.transcription_json_path(project_id),
+        storage.original_transcription_json_path(project_id),
+    )
+
     project.status = "transcribed"
     project.note_count = result["note_count"]
     project.error = None
@@ -204,6 +211,54 @@ def get_notes(project_id: str) -> JSONResponse:
     if not json_path.exists():
         raise HTTPException(status_code=404, detail="Project has not been transcribed yet")
     data = json.loads(json_path.read_text())
+    return JSONResponse(content=data)
+
+
+def _save_working_notes(project: Project, notes: list[dict]) -> dict:
+    """Write the working note list as the current transcription.
+
+    transcription.json is the single source every export reads (JSON download
+    directly; MusicXML/PDF generate from it on demand), so rewriting it plus
+    the static MIDI file makes every download reflect the edit.
+    """
+    notes = sorted(notes, key=lambda n: n["start_time"])
+    data = {
+        "project_id": project.id,
+        "project_name": project.name,
+        "source_audio": project.audio_filename,
+        "generated_at": storage.now_iso(),
+        "note_count": len(notes),
+        "notes": notes,
+    }
+    storage.transcription_json_path(project.id).write_text(json.dumps(data, indent=2))
+    write_midi_from_notes(notes, storage.midi_path(project.id))
+
+    project.note_count = len(notes)
+    project.updated_at = storage.now_iso()
+    storage.save_project(project)
+    return data
+
+
+@app.put("/api/projects/{project_id}/notes")
+def update_notes(project_id: str, body: NotesUpdate) -> JSONResponse:
+    project = _get_project_or_404(project_id)
+    if not storage.transcription_json_path(project_id).exists():
+        raise HTTPException(status_code=404, detail="Project has not been transcribed yet")
+    data = _save_working_notes(project, [n.model_dump() for n in body.notes])
+    return JSONResponse(content=data)
+
+
+@app.post("/api/projects/{project_id}/notes/reset")
+def reset_notes(project_id: str) -> JSONResponse:
+    project = _get_project_or_404(project_id)
+    original = storage.original_transcription_json_path(project_id)
+    if not original.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="No original transcription to reset to — run the transcription again.",
+        )
+    data = json.loads(original.read_text())
+    data = _save_working_notes(project, data["notes"])
     return JSONResponse(content=data)
 
 

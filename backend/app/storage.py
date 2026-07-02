@@ -57,6 +57,11 @@ def transcription_json_path(project_id: str) -> Path:
     return output_dir(project_id) / "transcription.json"
 
 
+def original_transcription_json_path(project_id: str) -> Path:
+    """Untouched copy of the transcription, kept so note edits can be undone."""
+    return output_dir(project_id) / "transcription-original.json"
+
+
 def _sheet_stem(instrument_key: str, style: str) -> str:
     stem = f"transcription-{instrument_key.replace('_', '-')}"
     if style == "raw":

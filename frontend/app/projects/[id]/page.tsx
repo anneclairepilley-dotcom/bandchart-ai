@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
@@ -12,7 +12,9 @@ import {
   jsonDownloadUrl,
   midiDownloadUrl,
   musicxmlDownloadUrl,
+  resetNotes,
   transcribeProject,
+  updateNotes,
   uploadAudio,
   type NotesResponse,
   type Project,
@@ -22,6 +24,7 @@ import { INSTRUMENTS, midiNoteName } from "@/lib/instruments";
 import StatusBadge from "@/components/StatusBadge";
 import NotePreview from "@/components/NotePreview";
 import PlayAlong from "@/components/PlayAlong";
+import SheetMusic from "@/components/SheetMusic";
 import type { Note } from "@/lib/api";
 
 // Memoized so the 60fps play-along position updates don't re-render every
@@ -31,14 +34,38 @@ const NoteTable = memo(function NoteTable({
   writtenLabel,
   writtenOffset,
   currentIndex,
+  autoScroll,
+  onDelete,
 }: {
   notes: Note[];
   writtenLabel: string;
   writtenOffset: number;
   currentIndex: number | null;
+  autoScroll: boolean;
+  onDelete: (index: number) => void;
 }) {
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  // Keep the highlighted row in view while playing, scrolling only this
+  // container (never the page).
+  useEffect(() => {
+    if (!autoScroll || currentIndex === null || !boxRef.current) return;
+    const box = boxRef.current;
+    const row = box.querySelector<HTMLTableRowElement>('tr[data-playing="true"]');
+    if (!row) return;
+    const rowTop = row.offsetTop;
+    const viewTop = box.scrollTop;
+    const viewBottom = viewTop + box.clientHeight;
+    if (rowTop < viewTop + 40 || rowTop + row.clientHeight > viewBottom - 20) {
+      box.scrollTo({
+        top: Math.max(0, rowTop - box.clientHeight / 2),
+        behavior: "smooth",
+      });
+    }
+  }, [currentIndex, autoScroll]);
+
   return (
-    <div className="max-h-96 overflow-y-auto rounded border border-gray-200">
+    <div ref={boxRef} className="max-h-96 overflow-y-auto rounded border border-gray-200">
       <table className="w-full text-left text-sm">
         <thead className="sticky top-0 bg-gray-50">
           <tr>
@@ -47,12 +74,15 @@ const NoteTable = memo(function NoteTable({
             <th className="p-2 font-medium">Start (s)</th>
             <th className="p-2 font-medium">Duration (s)</th>
             <th className="p-2 font-medium">Confidence</th>
+            <th className="p-2 font-medium">
+              <span className="sr-only">Delete</span>
+            </th>
           </tr>
         </thead>
         <tbody>
           {notes.map((note, i) => (
             <tr
-              key={i}
+              key={`${note.start_time}-${note.pitch}-${i}`}
               data-playing={i === currentIndex ? "true" : undefined}
               className={
                 i === currentIndex
@@ -65,6 +95,17 @@ const NoteTable = memo(function NoteTable({
               <td className="p-2">{note.start_time.toFixed(3)}</td>
               <td className="p-2">{note.duration.toFixed(3)}</td>
               <td className="p-2">{(note.confidence * 100).toFixed(0)}%</td>
+              <td className="p-2 text-right">
+                <button
+                  type="button"
+                  onClick={() => onDelete(i)}
+                  title={`Delete ${note.pitch_name} at ${note.start_time.toFixed(2)}s`}
+                  data-testid={`delete-note-${i}`}
+                  className="rounded px-2 py-0.5 text-xs text-red-600 hover:bg-red-50"
+                >
+                  ✕
+                </button>
+              </td>
             </tr>
           ))}
         </tbody>
@@ -136,6 +177,7 @@ export default function ProjectDetailPage() {
 
   const [playPosition, setPlayPosition] = useState<number | null>(null);
   const [playNoteIndex, setPlayNoteIndex] = useState<number | null>(null);
+  const [autoScroll, setAutoScroll] = useState(true);
   const handlePlayTick = useCallback(
     (position: number | null, noteIndex: number | null) => {
       setPlayPosition(position);
@@ -143,6 +185,66 @@ export default function ProjectDetailPage() {
     },
     []
   );
+
+  // Editable working copy of the notes. Deletes apply here instantly and are
+  // auto-saved to the backend (debounced), which rewrites the transcription
+  // JSON + MIDI so every download reflects the edit; notesVersion bumps make
+  // the sheet-music viewer re-fetch.
+  const [workingNotes, setWorkingNotes] = useState<Note[] | null>(null);
+  const [notesVersion, setNotesVersion] = useState(0);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const pendingSaveRef = useRef(false);
+
+
+  useEffect(() => {
+    if (!pendingSaveRef.current || workingNotes === null) return;
+    const timer = setTimeout(async () => {
+      try {
+        await updateNotes(projectId, workingNotes);
+        pendingSaveRef.current = false;
+        setSaveState("saved");
+        setSaveError(null);
+        setNotesVersion((v) => v + 1);
+      } catch (err) {
+        setSaveState("error");
+        setSaveError(
+          err instanceof ApiError
+            ? err.message
+            : "Couldn't save the edit — check that the backend is running."
+        );
+      }
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [workingNotes, projectId]);
+
+  const handleDeleteNote = useCallback((index: number) => {
+    pendingSaveRef.current = true;
+    setSaveState("saving");
+    setWorkingNotes((current) =>
+      current ? current.filter((_, i) => i !== index) : current
+    );
+  }, []);
+
+  const handleResetNotes = useCallback(async () => {
+    setSaveState("saving");
+    try {
+      const data = await resetNotes(projectId);
+      pendingSaveRef.current = false;
+      setWorkingNotes(data.notes);
+      setNotes(data);
+      setSaveState("idle");
+      setSaveError(null);
+      setNotesVersion((v) => v + 1);
+    } catch (err) {
+      setSaveState("error");
+      setSaveError(
+        err instanceof ApiError
+          ? err.message
+          : "Couldn't reset the notes — check that the backend is running."
+      );
+    }
+  }, [projectId]);
 
   async function handlePdfDownload() {
     setPdfDownloading(true);
@@ -212,7 +314,12 @@ export default function ProjectDetailPage() {
     let cancelled = false;
     getNotes(projectId)
       .then((data) => {
-        if (!cancelled) setNotes(data);
+        if (!cancelled) {
+          setNotes(data);
+          setWorkingNotes(data.notes);
+          pendingSaveRef.current = false;
+          setSaveState("idle");
+        }
       })
       .catch((err: unknown) => {
         if (!cancelled) {
@@ -274,6 +381,9 @@ export default function ProjectDetailPage() {
       setProject(updated);
       // A new file makes any previous results and errors stale.
       setNotes(null);
+      setWorkingNotes(null);
+      pendingSaveRef.current = false;
+      setSaveState("idle");
       setNotesError(null);
       setTranscribeError(null);
       setFile(null);
@@ -647,31 +757,93 @@ export default function ProjectDetailPage() {
             </div>
           )}
 
-          {notes && notes.note_count > 0 && (
+          {notes && workingNotes && workingNotes.length > 0 && (
             <>
-              <PlayAlong notes={notes.notes} onTick={handlePlayTick} />
+              <PlayAlong
+                notes={workingNotes}
+                onTick={handlePlayTick}
+                autoScroll={autoScroll}
+                onAutoScrollChange={setAutoScroll}
+              />
+
+              <div>
+                <h2 className="mb-2 text-lg font-medium">Sheet music</h2>
+                <SheetMusic
+                  projectId={projectId}
+                  instrumentKey={instrumentKey}
+                  sheetStyle={sheetStyle}
+                  notesVersion={notesVersion}
+                  playPosition={playPosition}
+                  autoScroll={autoScroll}
+                />
+              </div>
 
               <div>
                 <h2 className="mb-2 text-lg font-medium">
-                  Transcription preview ({notes.note_count} notes)
+                  Transcription preview ({workingNotes.length} notes)
                 </h2>
                 <NotePreview
-                  notes={notes.notes}
+                  notes={workingNotes}
                   playheadTime={playPosition}
                   currentNoteIndex={playNoteIndex}
+                  autoScroll={autoScroll}
                 />
               </div>
 
               <div>
-                <h2 className="mb-2 text-lg font-medium">Note detail</h2>
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <h2 className="text-lg font-medium">Note detail</h2>
+                  <div className="flex items-center gap-3">
+                    {saveState === "saving" && (
+                      <span className="text-xs text-gray-500">Saving edits…</span>
+                    )}
+                    {saveState === "saved" && (
+                      <span className="text-xs text-green-700" data-testid="edits-saved">
+                        Edits saved — downloads use the edited notes.
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleResetNotes}
+                      data-testid="reset-notes"
+                      className="rounded border border-gray-300 px-3 py-1 text-xs font-medium hover:bg-gray-50"
+                    >
+                      Reset to original transcription
+                    </button>
+                  </div>
+                </div>
+                {saveError && (
+                  <p className="mb-2 rounded border border-red-200 bg-red-50 p-2 text-sm text-red-700">
+                    {saveError}
+                  </p>
+                )}
                 <NoteTable
-                  notes={notes.notes}
+                  notes={workingNotes}
                   writtenLabel={selectedInstrument.label}
                   writtenOffset={selectedInstrument.writtenOffset}
                   currentIndex={playNoteIndex}
+                  autoScroll={autoScroll}
+                  onDelete={handleDeleteNote}
                 />
+                <p className="mt-1 text-xs text-gray-500">
+                  Click ✕ to delete a wrongly detected note — the preview,
+                  playback and all downloads update automatically.
+                </p>
               </div>
             </>
+          )}
+
+          {notes && workingNotes && workingNotes.length === 0 && notes.note_count !== 0 && (
+            <div className="rounded border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800">
+              <p className="mb-2">All notes have been deleted.</p>
+              <button
+                type="button"
+                onClick={handleResetNotes}
+                className="rounded border border-yellow-400 px-3 py-1 text-xs font-medium hover:bg-yellow-100"
+              >
+                Reset to original transcription
+              </button>
+            </div>
           )}
         </section>
       )}

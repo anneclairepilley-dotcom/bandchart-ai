@@ -1,3 +1,6 @@
+"use client";
+
+import { useEffect, useRef } from "react";
 import type { Note } from "@/lib/api";
 
 interface NotePreviewProps {
@@ -6,6 +9,8 @@ interface NotePreviewProps {
   playheadTime?: number | null;
   /** Index of the currently sounding note during play-along. */
   currentNoteIndex?: number | null;
+  /** Keep the playhead in view by scrolling the container horizontally. */
+  autoScroll?: boolean;
 }
 
 const PX_PER_SECOND = 60;
@@ -22,7 +27,21 @@ export default function NotePreview({
   notes,
   playheadTime = null,
   currentNoteIndex = null,
+  autoScroll = false,
 }: NotePreviewProps) {
+  const scrollBoxRef = useRef<HTMLDivElement>(null);
+
+  // Keep the playhead roughly centered while playing.
+  useEffect(() => {
+    if (!autoScroll || playheadTime === null || !scrollBoxRef.current) return;
+    const box = scrollBoxRef.current;
+    const playheadX = PADDING_X + playheadTime * PX_PER_SECOND;
+    const target = playheadX - box.clientWidth / 2;
+    if (Math.abs(box.scrollLeft - Math.max(0, target)) > 4) {
+      box.scrollLeft = Math.max(0, target);
+    }
+  }, [playheadTime, autoScroll]);
+
   if (notes.length === 0) {
     return (
       <div className="rounded border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500">
@@ -56,7 +75,10 @@ export default function NotePreview({
   }
 
   return (
-    <div className="w-full overflow-x-auto rounded border border-gray-200 bg-white">
+    <div
+      ref={scrollBoxRef}
+      className="w-full overflow-x-auto rounded border border-gray-200 bg-white"
+    >
       <svg
         width={width}
         height={height}
