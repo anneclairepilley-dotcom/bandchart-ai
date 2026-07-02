@@ -2,7 +2,7 @@
 
 AI music arranging and rehearsal app that turns songs into editable lead sheets, solo sheets, band charts and custom arrangements.
 
-## v0.4 — Transcription + Solo Parts + Cleaned Sheet Music
+## v0.5 — Transcription + Solo Parts + Sheet Music + Play Along
 
 This is the smallest possible working prototype: a local web app where you upload an audio
 file and the backend runs **real audio-to-pitch transcription** using
@@ -31,6 +31,10 @@ environments with newer Python versions.
   wobbles, merges repeated fragments, drops noise blips, snaps rhythm to an eighth-note
   grid, and adds an estimated key signature so most notes engrave without accidentals) or
   **Raw transcription** (every detected note, literally, on a sixteenth grid)
+- **Play Along mode**: hear the transcribed notes in the browser with Play/Pause/Stop, a
+  moving playhead and current-note highlighting, playback speeds of 50/75/100/125%, an
+  optional 4-click count-in, and a running time display (playback uses the generated
+  transcription, not the original audio — simple synthesized tones, by design)
 
 **Explicitly out of scope so far:** accounts, payments, full band charts, rehearsal packs,
 PDF export, YouTube support, complex editing, stem separation, drums, chord detection.
@@ -192,6 +196,20 @@ assumes a steady tempo near 120 BPM and works note-by-note — it won't fix a ru
 performance, detect the real tempo or time signature, or turn a rough take into a polished
 chart. The rhythm you see is still an approximation. The MIDI and JSON downloads always
 contain the untouched detection regardless of the style toggle.
+
+### Trying Play Along (beginner steps)
+
+1. Open a transcribed project and find the **Play Along** panel (below the download buttons)
+2. Click **Play** — after the optional 4-click count-in you'll hear the detected notes as
+   simple synthesized tones, with the sounding note highlighted in the piano roll and the
+   note table, and a moving playhead line
+3. **Pause** freezes playback where it is; pressing **Play** again continues from there;
+   **Stop** resets to the beginning
+4. Try the speed buttons — **50%** and **75%** are handy for practising along slowly;
+   pitch stays the same, only the pace changes
+5. Remember: playback is the *transcription*, not your recording — if a note sounds wrong
+   here, it will also be wrong in the sheet music, which makes this a quick way to check a
+   transcription by ear
 
 ## Troubleshooting
 

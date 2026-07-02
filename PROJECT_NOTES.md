@@ -72,9 +72,29 @@ Explanations, error messages, and README instructions must stay beginner-friendl
   "Sheet music style" radio toggle (Cleaned recommended/default vs Raw)
 - MIDI/JSON downloads intentionally stay raw — they're the faithful record
 
-### v0.5 — planned next
+### v0.6 — planned next
 Not decided. Ask the owner. (Their long-term list: full band charts, rehearsal packs,
 editing — but nothing is approved yet; see out-of-scope below.)
+
+### v0.5 — Play Along mode (done)
+- Frontend-only; no backend changes, no new dependencies (plain Web Audio API, no Tone.js)
+- `frontend/components/PlayAlong.tsx`: oscillator-per-note playback of the RAW
+  transcription notes (matching the piano roll; the style toggle affects downloads only)
+  - Look-ahead scheduler: a requestAnimationFrame loop schedules triangle-wave
+    oscillators (attack/release-enveloped) up to 0.25s ahead on the AudioContext clock;
+    transport position = anchorPos + (ctx.currentTime - anchorCtx) * rate
+  - Play/Pause/Stop, speeds 0.5/0.75/1/1.25 (re-anchors live; pitch unchanged),
+    optional 4-click square-wave count-in (only on fresh starts, beat = 0.5s/rate),
+    auto-stop at the end, resume mid-note re-schedules the remainder
+  - **Lint gotcha**: the new react-hooks rules reject self-referencing useCallbacks and
+    render-phase ref writes — the rAF body lives in a ref assigned inside a useEffect,
+    scheduled via a stable `tick` wrapper; keep that structure
+- Highlighting: PlayAlong reports (position, noteIndex) via onTick each frame; page passes
+  playheadTime/currentNoteIndex to NotePreview (orange playhead line + orange current
+  rect) and currentIndex to a memoized NoteTable (orange row, `data-playing` attr) so
+  60fps position updates don't re-render the table
+- AudioContext is created on the first Play click (browser autoplay policy) and closed on
+  unmount
 
 **Still out of scope (owner has said "not yet" repeatedly):** accounts, payments, full band
 charts, rehearsal packs, YouTube, chord detection, stem separation, drums, complex editing,
@@ -98,6 +118,11 @@ Next.js proxy, plus confirmed by the owner in Codespaces:
   7 notes / 0 ties / 0 accidentals / 0 sixteenths with a correct F major signature
   (transposing to D major for alto sax); PDFs visually compared; style toggle + filenames
   verified in-browser; clean is the default when no style param is sent
+- v0.5 Play Along, all in-browser (headless Chromium): play advances time and flips the
+  button to Pause; current-note row highlighted and playhead rendered; pause freezes and
+  resume continues; stop resets and clears highlights; 2s of wall clock advances the
+  transport ~2s at 100% vs ~1s at 50%; count-in holds transport at 0 for the first ~2s;
+  auto-stop fires at the end; all six download endpoints still 200 afterwards
 - Error paths: bad extension/oversize/empty rejected client-side and server-side with
   friendly messages; stale outputs cleared on re-upload (notes/MIDI/MusicXML 404 after)
 - `tsc --noEmit` and `npm run lint` clean; scripts syntax-checked and exercised
@@ -151,7 +176,8 @@ backend/  FastAPI (Python 3.9+; owner's Codespace uses 3.12)
   app/storage.py        storage/projects/<id>/{project.json,audio/,output/}
 frontend/ Next.js 16 (app router, Tailwind, TypeScript)
   app/page.tsx                  project list/create
-  app/projects/[id]/page.tsx    the whole project workflow UI
+  app/projects/[id]/page.tsx    the whole project workflow UI (memoized NoteTable inside)
+  components/PlayAlong.tsx      Web Audio play-along engine + panel
   lib/api.ts                    typed fetch helpers; API_BASE_URL defaults to "" (same-origin)
   lib/instruments.ts            instrument keys/labels/offsets (mirror of backend)
   next.config.ts                /api rewrite proxy, 60MB body, 10-min timeout,
