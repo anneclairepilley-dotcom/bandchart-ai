@@ -238,8 +238,8 @@ def download_json(project_id: str) -> FileResponse:
     return FileResponse(path=str(json_p), media_type="application/json", filename="transcription.json")
 
 
-def _generate_musicxml_or_error(project_id: str, instrument: str) -> Path:
-    """Validate instrument + transcription state and (re)generate the MusicXML file."""
+def _generate_musicxml_or_error(project_id: str, instrument: str, style: str) -> Path:
+    """Validate parameters + transcription state and (re)generate the MusicXML file."""
     project = _get_project_or_404(project_id)
     if instrument not in INSTRUMENTS:
         raise HTTPException(
@@ -247,18 +247,24 @@ def _generate_musicxml_or_error(project_id: str, instrument: str) -> Path:
             detail=f"Unknown instrument '{instrument}'. Valid choices: "
             + ", ".join(sorted(INSTRUMENTS)),
         )
+    if style not in ("clean", "raw"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown style '{style}'. Valid choices: clean, raw",
+        )
     json_p = storage.transcription_json_path(project_id)
     if not json_p.exists():
         raise HTTPException(status_code=404, detail="Project has not been transcribed yet")
 
     data = json.loads(json_p.read_text())
-    out_p = storage.musicxml_path(project_id, instrument)
+    out_p = storage.musicxml_path(project_id, instrument, style)
     try:
         notes_to_musicxml(
             notes=data["notes"],
             instrument_key=instrument,
             project_name=project.name,
             out_path=out_p,
+            style=style,
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
@@ -269,8 +275,10 @@ def _generate_musicxml_or_error(project_id: str, instrument: str) -> Path:
 
 
 @app.get("/api/projects/{project_id}/download/musicxml")
-def download_musicxml(project_id: str, instrument: str = "concert") -> FileResponse:
-    out_p = _generate_musicxml_or_error(project_id, instrument)
+def download_musicxml(
+    project_id: str, instrument: str = "concert", style: str = "clean"
+) -> FileResponse:
+    out_p = _generate_musicxml_or_error(project_id, instrument, style)
     return FileResponse(
         path=str(out_p),
         media_type="application/vnd.recordare.musicxml+xml",
@@ -279,9 +287,11 @@ def download_musicxml(project_id: str, instrument: str = "concert") -> FileRespo
 
 
 @app.get("/api/projects/{project_id}/download/pdf")
-def download_pdf(project_id: str, instrument: str = "concert") -> FileResponse:
-    musicxml_p = _generate_musicxml_or_error(project_id, instrument)
-    pdf_p = storage.pdf_path(project_id, instrument)
+def download_pdf(
+    project_id: str, instrument: str = "concert", style: str = "clean"
+) -> FileResponse:
+    musicxml_p = _generate_musicxml_or_error(project_id, instrument, style)
+    pdf_p = storage.pdf_path(project_id, instrument, style)
     try:
         musicxml_to_pdf(musicxml_p, pdf_p)
     except Exception as exc:  # noqa: BLE001

@@ -2,7 +2,7 @@
 
 AI music arranging and rehearsal app that turns songs into editable lead sheets, solo sheets, band charts and custom arrangements.
 
-## v0.3 — Transcription + Solo Parts + PDF Sheet Music
+## v0.4 — Transcription + Solo Parts + Cleaned Sheet Music
 
 This is the smallest possible working prototype: a local web app where you upload an audio
 file and the backend runs **real audio-to-pitch transcription** using
@@ -26,8 +26,11 @@ environments with newer Python versions.
   transposed for E♭/B♭ instruments
 - Download MIDI, JSON, MusicXML (sheet music that opens in
   [MuseScore](https://musescore.org) and similar apps), and **PDF sheet music** — all
-  written for the chosen instrument; rhythm is intentionally rough for now (fixed 120 BPM,
-  notes snapped to a sixteenth grid)
+  written for the chosen instrument
+- Choose between two sheet-music styles: **Cleaned sheet music** (default — smooths pitch
+  wobbles, merges repeated fragments, drops noise blips, snaps rhythm to an eighth-note
+  grid, and adds an estimated key signature so most notes engrave without accidentals) or
+  **Raw transcription** (every detected note, literally, on a sixteenth grid)
 
 **Explicitly out of scope so far:** accounts, payments, full band charts, rehearsal packs,
 PDF export, YouTube support, complex editing, stem separation, drums, chord detection.
@@ -169,16 +172,26 @@ else.
 > active) — newer versions add libraries (music21 for MusicXML, verovio/cairosvg/pypdf for
 > PDF export).
 
-### Trying the PDF export (beginner steps)
+### Trying the PDF export and cleanup (beginner steps)
 
 1. Open a project that has finished transcribing (status "transcribed")
 2. Pick an instrument from the **Solo instrument** dropdown — e.g. *Alto Sax (E♭)*
-3. Click **Download PDF (Alto Sax (E♭))**. The button shows "Preparing PDF…" for a few
+3. Leave **Sheet music style** on *Cleaned sheet music* (the default)
+4. Click **Download PDF (Alto Sax (E♭))**. The button shows "Preparing PDF…" for a few
    seconds while the sheet music is engraved, then the file lands in your Downloads folder
-4. Open it with any PDF viewer (double-click it — no special software needed). You should
+5. Open it with any PDF viewer (double-click it — no special software needed). You should
    see a titled page of real notation, transposed for the instrument you picked
-5. If something goes wrong, a red message appears under the buttons telling you what to do —
+6. **To see what the cleanup does:** switch the style to *Raw transcription*, download the
+   PDF again (it gets `-raw` in its filename), and compare the two side by side — the raw
+   one typically has many more short notes, ties and accidentals
+7. If something goes wrong, a red message appears under the buttons telling you what to do —
    the MusicXML download keeps working either way
+
+**What the cleanup can and can't do:** it makes real recordings much more readable, but it
+assumes a steady tempo near 120 BPM and works note-by-note — it won't fix a rushed
+performance, detect the real tempo or time signature, or turn a rough take into a polished
+chart. The rhythm you see is still an approximation. The MIDI and JSON downloads always
+contain the untouched detection regardless of the style toggle.
 
 ## Troubleshooting
 
@@ -232,8 +245,8 @@ All endpoints are under `/api`.
 | GET | `/projects/{id}/audio` | Stream the original uploaded audio |
 | GET | `/projects/{id}/download/midi` | Download the generated MIDI file |
 | GET | `/projects/{id}/download/json` | Download the generated notes JSON file |
-| GET | `/projects/{id}/download/musicxml?instrument=<key>` | Download MusicXML for a solo instrument — keys: `concert`, `piano`, `flute`, `violin`, `alto_sax`, `tenor_sax`, `trumpet`, `clarinet` |
-| GET | `/projects/{id}/download/pdf?instrument=<key>` | Download PDF sheet music for a solo instrument (same keys) |
+| GET | `/projects/{id}/download/musicxml?instrument=<key>&style=<clean\|raw>` | Download MusicXML for a solo instrument — instrument keys: `concert`, `piano`, `flute`, `violin`, `alto_sax`, `tenor_sax`, `trumpet`, `clarinet`; style defaults to `clean` |
+| GET | `/projects/{id}/download/pdf?instrument=<key>&style=<clean\|raw>` | Download PDF sheet music (same parameters) |
 
 Each note in the JSON output has: `pitch` (MIDI number), `pitch_name` (e.g. `"C4"`),
 `start_time` (seconds), `duration` (seconds), and `confidence` (0–1, pYIN's voiced-pitch

@@ -54,7 +54,25 @@ Explanations, error messages, and README instructions must stay beginner-friendl
 - Frontend: "Download PDF (<instrument>)" button follows the selector; uses fetch + blob
   (not a plain link) so PDF failures show the backend's friendly message in a red box
 
-### v0.4 — planned next
+### v0.4 — notation cleanup (done)
+- `backend/app/notation_cleanup.py`: pure-Python pass between transcription and
+  MusicXML/PDF export (stored transcription.json is never modified). Pipeline:
+  pitch-wobble smoothing (short jump-and-return notes absorbed into neighbours) →
+  same-pitch merge (gaps ≤0.12s) → fragment removal (<0.15s) → eighth-note quantization
+  (starts and durations, at the fixed 120 BPM)
+- `notes_to_musicxml(style="clean"|"raw")`: clean (default) runs cleanup + estimates a key
+  via music21 `analyze('key')`, inserts a KeySignature (transposes correctly through
+  toWrittenPitch), and respells accidentals to match the key (flats in flat keys, no
+  E#/Cb/double accidentals). raw = literal v0.3 behaviour (sixteenth grid, no key sig),
+  title gets a "(raw transcription)" suffix, filenames a "-raw" suffix
+- **Gotcha (hard-won)**: music21 pitches created from MIDI numbers carry explicit
+  natural Accidental objects; makeAccidentals then displays spurious naturals. The respell
+  step strips alter==0 accidentals — keep that, or naturals reappear
+- Endpoints take `style=clean|raw` (default clean, 400 on anything else); frontend has a
+  "Sheet music style" radio toggle (Cleaned recommended/default vs Raw)
+- MIDI/JSON downloads intentionally stay raw — they're the faithful record
+
+### v0.5 — planned next
 Not decided. Ask the owner. (Their long-term list: full band charts, rehearsal packs,
 editing — but nothing is approved yet; see out-of-scope below.)
 
@@ -74,14 +92,25 @@ Next.js proxy, plus confirmed by the owner in Codespaces:
   notation, correct title/part name, no missing-glyph boxes); 12 sequential + 6 concurrent
   requests all succeed (singleton-toolkit fix); browser download event fires; simulated
   500 shows the friendly error in the UI
+- v0.4 cleanup: unit-tested (wobble absorption, same-pitch merge, fragment drop, grid
+  snap, melody preservation); on a synthetic vibrato melody with re-articulations the
+  cleaned engraving went from 9 notes / 2 ties / 4 accidentals / 3 sixteenths (raw) to
+  7 notes / 0 ties / 0 accidentals / 0 sixteenths with a correct F major signature
+  (transposing to D major for alto sax); PDFs visually compared; style toggle + filenames
+  verified in-browser; clean is the default when no style param is sent
 - Error paths: bad extension/oversize/empty rejected client-side and server-side with
   friendly messages; stale outputs cleared on re-upload (notes/MIDI/MusicXML 404 after)
 - `tsc --noEmit` and `npm run lint` clean; scripts syntax-checked and exercised
 
 ## Current limitations
 - **Monophonic only**: pYIN follows one melody line; chords/full-band mixes won't work
-- **Rhythm is rough**: fixed 120 BPM assumption, 4/4, sixteenth-grid quantization —
-  MusicXML timing will not match the recording's real tempo
+- **Rhythm is approximate**: fixed 120 BPM assumption, 4/4; cleaned style quantizes to an
+  eighth grid (raw: sixteenth) — no real tempo/meter detection, so timing won't match a
+  performance that isn't near 120 BPM
+- **Cleanup trade-offs**: repeated same-pitch notes with small gaps merge into one longer
+  note; genuinely fast ornaments shorter than ~0.15s are treated as noise and dropped;
+  key estimation can pick a wrong key on short/chromatic material (raw style is the
+  escape hatch)
 - `.mp3`/`.m4a` need ffmpeg on the server (Codespaces: `sudo apt-get install -y ffmpeg`);
   `.wav/.flac/.ogg` work without
 - Synchronous transcription request (no job queue); Next proxy timeout raised to 10 min
@@ -116,7 +145,8 @@ the Next server proxies `/api/*` to the backend (see `frontend/next.config.ts`).
 backend/  FastAPI (Python 3.9+; owner's Codespace uses 3.12)
   app/main.py           all routes under /api; friendly error mapping
   app/transcription.py  pYIN engine — DO NOT swap without explicit request
-  app/musicxml.py       music21 export + INSTRUMENTS table
+  app/musicxml.py       music21 export + INSTRUMENTS table (style=clean|raw)
+  app/notation_cleanup.py  wobble/merge/fragment/quantize pipeline for clean style
   app/pdf.py            verovio/cairosvg/pypdf PDF engraving (singleton toolkit + lock)
   app/storage.py        storage/projects/<id>/{project.json,audio/,output/}
 frontend/ Next.js 16 (app router, Tailwind, TypeScript)
