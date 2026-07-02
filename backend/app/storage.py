@@ -57,12 +57,19 @@ def transcription_json_path(project_id: str) -> Path:
     return output_dir(project_id) / "transcription.json"
 
 
-def musicxml_path(project_id: str, instrument_key: str) -> Path:
-    return output_dir(project_id) / f"transcription-{instrument_key.replace('_', '-')}.musicxml"
+def _sheet_stem(instrument_key: str, style: str) -> str:
+    stem = f"transcription-{instrument_key.replace('_', '-')}"
+    if style == "raw":
+        stem += "-raw"
+    return stem
 
 
-def pdf_path(project_id: str, instrument_key: str) -> Path:
-    return output_dir(project_id) / f"transcription-{instrument_key.replace('_', '-')}.pdf"
+def musicxml_path(project_id: str, instrument_key: str, style: str = "clean") -> Path:
+    return output_dir(project_id) / f"{_sheet_stem(instrument_key, style)}.musicxml"
+
+
+def pdf_path(project_id: str, instrument_key: str, style: str = "clean") -> Path:
+    return output_dir(project_id) / f"{_sheet_stem(instrument_key, style)}.pdf"
 
 
 def project_exists(project_id: str) -> bool:

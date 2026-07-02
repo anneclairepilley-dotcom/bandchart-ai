@@ -146,12 +146,16 @@ export function jsonDownloadUrl(projectId: string): string {
   return `${API_BASE_URL}/api/projects/${projectId}/download/json`;
 }
 
+/** Sheet-music rendering style: cleaned-up notation or the literal detection. */
+export type SheetStyle = "clean" | "raw";
+
 /** Direct URL for downloading the MusicXML file for a solo instrument. */
 export function musicxmlDownloadUrl(
   projectId: string,
-  instrumentKey: string
+  instrumentKey: string,
+  style: SheetStyle = "clean"
 ): string {
-  return `${API_BASE_URL}/api/projects/${projectId}/download/musicxml?instrument=${encodeURIComponent(instrumentKey)}`;
+  return `${API_BASE_URL}/api/projects/${projectId}/download/musicxml?instrument=${encodeURIComponent(instrumentKey)}&style=${style}`;
 }
 
 /**
@@ -163,9 +167,10 @@ export function musicxmlDownloadUrl(
  */
 export async function fetchPdf(
   projectId: string,
-  instrumentKey: string
+  instrumentKey: string,
+  style: SheetStyle = "clean"
 ): Promise<Blob> {
-  const url = `${API_BASE_URL}/api/projects/${projectId}/download/pdf?instrument=${encodeURIComponent(instrumentKey)}`;
+  const url = `${API_BASE_URL}/api/projects/${projectId}/download/pdf?instrument=${encodeURIComponent(instrumentKey)}&style=${style}`;
   let response: Response;
   try {
     response = await fetch(url);

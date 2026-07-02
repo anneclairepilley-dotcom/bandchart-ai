@@ -16,6 +16,7 @@ import {
   uploadAudio,
   type NotesResponse,
   type Project,
+  type SheetStyle,
 } from "@/lib/api";
 import { INSTRUMENTS, midiNoteName } from "@/lib/instruments";
 import StatusBadge from "@/components/StatusBadge";
@@ -77,6 +78,8 @@ export default function ProjectDetailPage() {
   const selectedInstrument =
     INSTRUMENTS.find((i) => i.key === instrumentKey) ?? INSTRUMENTS[0];
 
+  const [sheetStyle, setSheetStyle] = useState<SheetStyle>("clean");
+
   const [pdfDownloading, setPdfDownloading] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
 
@@ -84,11 +87,11 @@ export default function ProjectDetailPage() {
     setPdfDownloading(true);
     setPdfError(null);
     try {
-      const blob = await fetchPdf(projectId, instrumentKey);
+      const blob = await fetchPdf(projectId, instrumentKey, sheetStyle);
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `transcription-${instrumentKey.replace(/_/g, "-")}.pdf`;
+      link.download = `transcription-${instrumentKey.replace(/_/g, "-")}${sheetStyle === "raw" ? "-raw" : ""}.pdf`;
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -483,6 +486,35 @@ export default function ProjectDetailPage() {
                 ? `${selectedInstrument.label} is a transposing instrument — its written part is ${selectedInstrument.writtenOffset} semitones above the detected concert pitch. The note table and MusicXML download below use the written pitch.`
                 : "This instrument reads at concert pitch, so written and detected pitches are the same."}
             </p>
+
+            <fieldset className="mt-4">
+              <legend className="mb-1 block text-sm font-medium">
+                Sheet music style
+              </legend>
+              <div className="flex flex-col gap-1 text-sm">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="sheetStyle"
+                    value="clean"
+                    checked={sheetStyle === "clean"}
+                    onChange={() => setSheetStyle("clean")}
+                  />
+                  Cleaned sheet music (recommended) — smooths wobbles, merges
+                  repeated notes, simpler rhythms and key
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="sheetStyle"
+                    value="raw"
+                    checked={sheetStyle === "raw"}
+                    onChange={() => setSheetStyle("raw")}
+                  />
+                  Raw transcription — every detected note, exactly as heard
+                </label>
+              </div>
+            </fieldset>
           </div>
 
           <div className="flex flex-wrap gap-4">
@@ -501,7 +533,7 @@ export default function ProjectDetailPage() {
               Download JSON
             </a>
             <a
-              href={musicxmlDownloadUrl(projectId, instrumentKey)}
+              href={musicxmlDownloadUrl(projectId, instrumentKey, sheetStyle)}
               download
               className="rounded border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-50"
             >
