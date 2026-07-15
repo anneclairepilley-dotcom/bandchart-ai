@@ -613,10 +613,22 @@ export default function ProjectDetailPage() {
             </p>
           )}
           {ytError && (
-            <p className="rounded border border-red-200 bg-red-50 p-2 text-sm text-red-700">
-              {ytError}
-            </p>
+            <div className="rounded border border-red-200 bg-red-50 p-2 text-sm text-red-700">
+              <p>{ytError}</p>
+              <button
+                type="button"
+                onClick={() => setSourceMode("file")}
+                data-testid="yt-switch-to-upload"
+                className="mt-2 rounded border border-red-300 bg-white px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
+              >
+                Switch to Upload audio file
+              </button>
+            </div>
           )}
+          <p className="text-xs text-gray-500">
+            If YouTube blocks import, download or record the audio yourself
+            and use Upload audio file instead.
+          </p>
           <p className="text-xs text-gray-500">
             YouTube import uses the same monophonic transcription engine. It
             works best on clear single melody lines, not full band mixes.

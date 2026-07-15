@@ -59,6 +59,21 @@ def _friendly_download_error(exc: Exception) -> YoutubeImportError:
     # Network problems first: their messages can contain arbitrary other words
     # (e.g. "Unable to download API page ... Confirm you are on the latest
     # version"), so more specific checks must not run before this one.
+    # YouTube's bot/rate blocks come first: they often arrive wrapped in
+    # network-sounding text ("Unable to download API page: HTTP Error 403"),
+    # so this check must run before the generic network branch.
+    if (
+        ("sign in to confirm" in lowered and "bot" in lowered)
+        or "http error 403" in lowered
+        or "http error 429" in lowered
+        or "too many requests" in lowered
+    ):
+        return YoutubeImportError(
+            "YouTube blocked this cloud server from downloading the audio. This "
+            "can happen in Codespaces. Try another video, upload an audio file "
+            "instead, or run the app locally.",
+            status_code=502,
+        )
     if re.search(
         r"unable to connect|proxy|getaddrinfo|timed? ?out|temporary failure"
         r"|connection (refused|reset|aborted)|unable to download (api page|webpage)"
@@ -69,13 +84,6 @@ def _friendly_download_error(exc: Exception) -> YoutubeImportError:
             "Couldn't reach YouTube from the server — YouTube may be blocked on "
             "this network, or the connection dropped. Check the internet "
             "connection and try again.",
-            status_code=502,
-        )
-    if "sign in to confirm" in lowered and "bot" in lowered:
-        return YoutubeImportError(
-            "YouTube is asking this server to prove it isn't a bot, which can "
-            "happen on cloud machines. Wait a little and try again, or try a "
-            "different video.",
             status_code=502,
         )
     if "private video" in lowered or ("sign in" in lowered and "private" in lowered):

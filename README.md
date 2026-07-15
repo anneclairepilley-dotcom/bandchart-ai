@@ -267,6 +267,19 @@ Notes and limits:
   a plain-English message saying so — your project's existing audio and results are never
   touched by a failed import
 
+### YouTube import limitations in Codespaces
+
+YouTube sometimes blocks downloads coming from cloud servers (Codespaces machines run in
+data centres, and YouTube treats heavy data-centre traffic as suspicious). If that
+happens you'll see: *"YouTube blocked this cloud server from downloading the audio…"*.
+
+- **This is not necessarily an app bug** — the app asked correctly and YouTube refused
+- **The fallback always works**: download or record the audio yourself and use the normal
+  **Upload audio file** option — everything after the import step is identical
+- **Running the app on your own computer** often works better, since YouTube is less
+  suspicious of home internet connections than of data centres
+- Trying again later, or a different video, sometimes gets through
+
 **YouTube import troubleshooting:**
 - *"yt-dlp library is missing"* — in the backend terminal (venv active) run
   `pip install -r requirements.txt`, then restart the backend
