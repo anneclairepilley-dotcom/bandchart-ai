@@ -23,6 +23,16 @@ fail() {
 [ -d "backend/.venv" ]        || fail "The backend isn't set up yet. Double-click setup.command first."
 [ -d "frontend/node_modules" ] || fail "The frontend isn't set up yet. Double-click setup.command first."
 
+# Friendly guard against double-starting: if the ports are taken, the app
+# (or something else) is already running.
+if command -v lsof >/dev/null 2>&1; then
+  for port in 8000 3000; do
+    if lsof -nP -iTCP:$port -sTCP:LISTEN >/dev/null 2>&1; then
+      fail "Something is already using port $port — BandChart AI may already be running. Check for another Terminal window running the app (or open http://localhost:3000 directly), close it, then try again."
+    fi
+  done
+fi
+
 BACKEND_PID=""
 FRONTEND_PID=""
 

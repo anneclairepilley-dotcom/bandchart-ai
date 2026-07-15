@@ -59,6 +59,22 @@ PDF export, YouTube support, complex editing, stem separation, drums, chord dete
 
 ---
 
+## Run locally on Mac for YouTube import
+
+YouTube often blocks downloads coming from cloud servers like Codespaces, but is usually
+happy with home internet connections — so if YouTube import keeps getting blocked, running
+the app on your own Mac is the best fix. It's the same app with the same features; only
+the computer changes. (Your Codespaces projects don't transfer over — each place keeps its
+own local storage — and Codespaces keeps working as before.)
+
+It takes three double-clicks, described step by step in the next section:
+
+1. **`check.command`** — confirms Python, Node/npm, ffmpeg and yt-dlp are ready, with an
+   install command for anything missing (ffmpeg matters: **YouTube import needs it**)
+2. **`setup.command`** — installs everything the app needs, including yt-dlp for YouTube
+   import (safe to run again any time)
+3. **`start.command`** — starts the app and opens http://localhost:3000 in your browser
+
 ## Quick Start (Mac) — no coding required
 
 This folder includes three double-click scripts that do all the technical setup for you.
@@ -70,10 +86,11 @@ Use them in order, top to bottom.
 
 **Step 1 — Check your computer is ready.** Double-click **`check.command`**.
 
-A Terminal window opens and tells you whether Python, Node.js, npm, and ffmpeg are
-installed, with a one-line command to install anything that's missing (via
-[Homebrew](https://brew.sh) — the script tells you how to get that too, if you don't have it).
-Fix anything marked `[MISSING]`, then run it again until everything says `[OK]`.
+A Terminal window opens and tells you whether Python, Node.js, npm, ffmpeg, and yt-dlp
+(for YouTube import) are ready, with a one-line command to install anything that's missing
+(via [Homebrew](https://brew.sh) — the script tells you how to get that too, if you don't
+have it). Fix anything marked `[MISSING]`, then run it again until everything says `[OK]`.
+(`yt-dlp` showing `[LATER]` is normal before first setup — setup.command installs it.)
 
 **Step 2 — Set everything up.** Double-click **`setup.command`**.
 
