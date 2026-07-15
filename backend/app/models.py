@@ -18,6 +18,11 @@ class Project(BaseModel):
     audio_filename: Optional[str] = None
     note_count: Optional[int] = None
     error: Optional[str] = None
+    # Where the audio came from: "upload" or "youtube" (None on old projects).
+    source_type: Optional[str] = None
+    source_url: Optional[str] = None
+    rights_confirmed: Optional[bool] = None
+    imported_at: Optional[str] = None
 
 
 class ProjectCreate(BaseModel):
@@ -36,6 +41,13 @@ class NotesUpdate(BaseModel):
     """Body of PUT /projects/{id}/notes — the edited working note list."""
 
     notes: list[Note]
+
+
+class YoutubeImport(BaseModel):
+    """Body of POST /projects/{id}/youtube."""
+
+    url: str
+    rights_confirmed: bool = False
 
 
 class TranscriptionResult(BaseModel):

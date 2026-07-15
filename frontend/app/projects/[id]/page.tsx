@@ -9,6 +9,7 @@ import {
   fetchPdf,
   getNotes,
   getProject,
+  importYoutube,
   jsonDownloadUrl,
   midiDownloadUrl,
   musicxmlDownloadUrl,
@@ -420,14 +421,52 @@ export default function ProjectDetailPage() {
     }
   }
 
+  const [sourceMode, setSourceMode] = useState<"file" | "youtube">("file");
+  const [ytUrl, setYtUrl] = useState("");
+  const [ytRights, setYtRights] = useState(false);
+  const [ytImporting, setYtImporting] = useState(false);
+  const [ytError, setYtError] = useState<string | null>(null);
+
+  async function handleYoutubeImport() {
+    setYtImporting(true);
+    setYtError(null);
+    try {
+      const updated = await importYoutube(projectId, ytUrl.trim(), ytRights);
+      setProject(updated);
+      // Fresh audio: clear anything from a previous transcription/edit.
+      setNotes(null);
+      setWorkingNotes(null);
+      pendingSaveRef.current = false;
+      setSaveState("idle");
+      setSaveError(null);
+      setNotesError(null);
+      setTranscribeError(null);
+      setReplacingAudio(false);
+      setYtUrl("");
+      setYtRights(false);
+      // Go straight into transcription so the user lands on results.
+      void handleTranscribe();
+    } catch (err) {
+      setYtError(
+        err instanceof ApiError
+          ? err.message
+          : "YouTube import failed — check that the backend is running, then try again."
+      );
+    } finally {
+      setYtImporting(false);
+    }
+  }
+
   const showUploadForm =
     project?.status === "created" || replacingAudio;
+
+  const sourceBusy = uploading || ytImporting;
 
   const uploadForm = (
     <section className="rounded border border-gray-200 p-4">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-lg font-medium">
-          {replacingAudio ? "Upload a different file" : "Upload audio"}
+          {replacingAudio ? "Replace the audio" : "Add audio"}
         </h2>
         {replacingAudio && (
           <button
@@ -435,52 +474,156 @@ export default function ProjectDetailPage() {
             onClick={() => {
               setReplacingAudio(false);
               setUploadError(null);
+              setYtError(null);
               setFile(null);
             }}
-            disabled={uploading}
+            disabled={sourceBusy}
             className="text-sm text-gray-500 hover:underline disabled:opacity-50"
           >
             Cancel
           </button>
         )}
       </div>
+
+      <div className="mb-3 flex gap-2">
+        <button
+          type="button"
+          onClick={() => setSourceMode("file")}
+          disabled={sourceBusy}
+          data-testid="source-file"
+          className={`rounded px-3 py-1.5 text-sm font-medium ${
+            sourceMode === "file"
+              ? "bg-blue-600 text-white"
+              : "border border-gray-300 hover:bg-gray-50"
+          }`}
+        >
+          Upload audio file
+        </button>
+        <button
+          type="button"
+          onClick={() => setSourceMode("youtube")}
+          disabled={sourceBusy}
+          data-testid="source-youtube"
+          className={`rounded px-3 py-1.5 text-sm font-medium ${
+            sourceMode === "youtube"
+              ? "bg-blue-600 text-white"
+              : "border border-gray-300 hover:bg-gray-50"
+          }`}
+        >
+          Import from YouTube
+        </button>
+      </div>
+
       <div className="mb-3">
         <TestFilesNote />
       </div>
-      <form onSubmit={handleUpload} className="flex flex-col gap-3">
-        <input
-          type="file"
-          accept={ACCEPTED_EXTENSIONS.join(",")}
-          onChange={(e) => {
-            setFile(e.target.files?.[0] ?? null);
-            setUploadError(null);
-          }}
-          className="text-sm"
-          disabled={uploading}
-        />
-        <button
-          type="submit"
-          disabled={uploading}
-          className="flex w-fit items-center gap-2 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {uploading && (
-            <span
-              className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"
-              aria-hidden
+
+      {sourceMode === "file" && (
+        <>
+          <form onSubmit={handleUpload} className="flex flex-col gap-3">
+            <input
+              type="file"
+              accept={ACCEPTED_EXTENSIONS.join(",")}
+              onChange={(e) => {
+                setFile(e.target.files?.[0] ?? null);
+                setUploadError(null);
+              }}
+              className="text-sm"
+              disabled={uploading}
             />
+            <button
+              type="submit"
+              disabled={uploading}
+              className="flex w-fit items-center gap-2 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {uploading && (
+                <span
+                  className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"
+                  aria-hidden
+                />
+              )}
+              {uploading ? "Uploading…" : "Upload Audio"}
+            </button>
+          </form>
+          {uploading && (
+            <p className="mt-2 text-sm text-gray-500">
+              Sending {file?.name} to the server — large files can take a moment.
+            </p>
           )}
-          {uploading ? "Uploading…" : "Upload Audio"}
-        </button>
-      </form>
-      {uploading && (
-        <p className="mt-2 text-sm text-gray-500">
-          Sending {file?.name} to the server — large files can take a moment.
-        </p>
+          {uploadError && (
+            <p className="mt-2 rounded border border-red-200 bg-red-50 p-2 text-sm text-red-700">
+              {uploadError}
+            </p>
+          )}
+        </>
       )}
-      {uploadError && (
-        <p className="mt-2 rounded border border-red-200 bg-red-50 p-2 text-sm text-red-700">
-          {uploadError}
-        </p>
+
+      {sourceMode === "youtube" && (
+        <div className="flex flex-col gap-3">
+          <input
+            type="url"
+            value={ytUrl}
+            onChange={(e) => {
+              setYtUrl(e.target.value);
+              setYtError(null);
+            }}
+            placeholder="https://www.youtube.com/watch?v=…"
+            disabled={ytImporting}
+            data-testid="yt-url"
+            className="rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+          />
+          <label className="flex items-start gap-2 text-sm text-gray-700">
+            <input
+              type="checkbox"
+              checked={ytRights}
+              onChange={(e) => setYtRights(e.target.checked)}
+              disabled={ytImporting}
+              data-testid="yt-rights"
+              className="mt-0.5"
+            />
+            <span>
+              I confirm I own this content or have permission to process it
+              for private transcription/arrangement use.
+            </span>
+          </label>
+          <p className="text-xs text-gray-500">
+            BandChart AI does not publish, share or create a public library
+            from your transcription.
+          </p>
+          <button
+            type="button"
+            onClick={handleYoutubeImport}
+            disabled={ytImporting || !ytUrl.trim() || !ytRights}
+            data-testid="yt-import"
+            className="flex w-fit items-center gap-2 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {ytImporting && (
+              <span
+                className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"
+                aria-hidden
+              />
+            )}
+            {ytImporting ? "Importing…" : "Import YouTube audio"}
+          </button>
+          {ytImporting && (
+            <p className="text-sm text-gray-500">
+              Importing from YouTube — checking the link, extracting the audio
+              and converting it to WAV… this can take a minute for longer
+              clips. Transcription starts automatically when it&apos;s done.
+            </p>
+          )}
+          {ytError && (
+            <p className="rounded border border-red-200 bg-red-50 p-2 text-sm text-red-700">
+              {ytError}
+            </p>
+          )}
+          <p className="text-xs text-gray-500">
+            YouTube import uses the same monophonic transcription engine. It
+            works best on clear single melody lines, not full band mixes.
+            Videos longer than 10 minutes are rejected for now — short clips
+            work best.
+          </p>
+        </div>
       )}
     </section>
   );
@@ -558,7 +701,9 @@ export default function ProjectDetailPage() {
           <h2 className="mb-1 text-lg font-medium">Audio</h2>
           {project.audio_filename && (
             <p className="mb-3 text-xs text-gray-500">
-              File: {project.audio_filename}
+              {project.source_type === "youtube" && project.source_url
+                ? `Imported from YouTube: ${project.source_url}`
+                : `File: ${project.audio_filename}`}
             </p>
           )}
           <audio controls src={audioUrl(projectId)} className="w-full">
@@ -627,10 +772,15 @@ export default function ProjectDetailPage() {
 
       {project.status === "transcribed" && !replacingAudio && (
         <section className="flex flex-col gap-4">
-          <div className="flex items-center gap-4">
+          <div>
             <audio controls src={audioUrl(projectId)} className="w-full">
               Your browser does not support the audio element.
             </audio>
+            {project.source_type === "youtube" && project.source_url && (
+              <p className="mt-1 text-xs text-gray-500">
+                Imported from YouTube: {project.source_url}
+              </p>
+            )}
           </div>
 
           <div className="rounded border border-gray-200 p-4">

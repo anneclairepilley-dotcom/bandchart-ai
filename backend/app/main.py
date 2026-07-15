@@ -12,10 +12,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
 from app import storage
-from app.models import NotesUpdate, Project, ProjectCreate
+from app.models import NotesUpdate, Project, ProjectCreate, YoutubeImport
 from app.musicxml import INSTRUMENTS, notes_to_musicxml
 from app.pdf import musicxml_to_pdf
 from app.transcription import run_transcription, write_midi_from_notes
+from app.youtube import YoutubeImportError, download_audio_as_wav, is_valid_youtube_url
 
 app = FastAPI(title="BandChart AI Backend", version="0.1.0")
 
@@ -141,31 +142,99 @@ async def upload_audio(project_id: str, file: UploadFile = File(...)) -> Project
             detail="The uploaded file is empty (0 bytes). Please pick the audio file again.",
         )
 
-    a_dir = storage.audio_dir(project_id)
-    a_dir.mkdir(parents=True, exist_ok=True)
-
-    # Remove any previously uploaded audio for this project before saving the new one.
-    for existing in a_dir.iterdir():
-        if existing.is_file():
-            existing.unlink()
+    _clear_audio_and_outputs(project_id)
 
     saved_filename = safe_name
-    saved_path = a_dir / saved_filename
+    saved_path = storage.audio_dir(project_id) / saved_filename
     saved_path.write_bytes(contents)
-
-    # Clear outputs from any earlier transcription (notes JSON, MIDI, any
-    # generated MusicXML) so stale results are never served for the new audio.
-    out_dir = storage.output_dir(project_id)
-    if out_dir.exists():
-        for stale in out_dir.iterdir():
-            if stale.is_file():
-                stale.unlink()
 
     project.audio_filename = saved_filename
     project.status = "uploaded"
     project.note_count = None
     project.updated_at = storage.now_iso()
     project.error = None
+    project.source_type = "upload"
+    project.source_url = None
+    project.rights_confirmed = None
+    project.imported_at = None
+    storage.save_project(project)
+    return project
+
+
+def _clear_audio_and_outputs(project_id: str) -> None:
+    """Remove previous audio and all stale generated outputs for a project."""
+    a_dir = storage.audio_dir(project_id)
+    a_dir.mkdir(parents=True, exist_ok=True)
+    for existing in a_dir.iterdir():
+        if existing.is_file():
+            existing.unlink()
+    out_dir = storage.output_dir(project_id)
+    if out_dir.exists():
+        for stale in out_dir.iterdir():
+            if stale.is_file():
+                stale.unlink()
+
+
+@app.post("/api/projects/{project_id}/youtube", response_model=Project)
+def import_youtube(project_id: str, body: YoutubeImport) -> Project:
+    project = _get_project_or_404(project_id)
+
+    url = body.url.strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="Paste a YouTube link first.")
+    if not is_valid_youtube_url(url):
+        raise HTTPException(
+            status_code=400,
+            detail="That doesn't look like a YouTube link. Expected something like "
+            "https://www.youtube.com/watch?v=… or https://youtu.be/…",
+        )
+    if not body.rights_confirmed:
+        raise HTTPException(
+            status_code=400,
+            detail="Please tick the box confirming you have permission to process "
+            "this content before importing.",
+        )
+
+    # Download into a temp folder inside the project first: the project's
+    # existing audio and outputs are only replaced once the new audio has
+    # fully arrived, so a failed import never destroys previous work.
+    tmp_dir = storage.project_dir(project_id) / "import-tmp"
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+    try:
+        saved_filename, _info = download_audio_as_wav(url, tmp_dir)
+    except YoutubeImportError as exc:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"YouTube import failed unexpectedly ({exc}). Try again, or "
+            "upload an audio file instead.",
+        ) from exc
+
+    # The download can take a while — if the project was deleted meanwhile,
+    # don't resurrect it from the recreated temp folder.
+    if not storage.project_exists(project_id):
+        shutil.rmtree(storage.project_dir(project_id), ignore_errors=True)
+        raise HTTPException(
+            status_code=404,
+            detail="This project was deleted while the import was running.",
+        )
+
+    _clear_audio_and_outputs(project_id)
+    shutil.move(str(tmp_dir / saved_filename), str(storage.audio_dir(project_id) / saved_filename))
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    project.audio_filename = saved_filename
+    project.status = "uploaded"
+    project.note_count = None
+    project.updated_at = storage.now_iso()
+    project.error = None
+    project.source_type = "youtube"
+    project.source_url = url
+    project.rights_confirmed = True
+    project.imported_at = storage.now_iso()
     storage.save_project(project)
     return project
 

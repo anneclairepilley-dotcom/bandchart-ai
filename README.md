@@ -2,7 +2,7 @@
 
 AI music arranging and rehearsal app that turns songs into editable lead sheets, solo sheets, band charts and custom arrangements.
 
-## v0.5.5 — Transcription + Solo Parts + Sheet Music + Play Along + Editing
+## v0.6 — Transcription + Solo Parts + Sheet Music + Play Along + Editing + YouTube Import
 
 This is the smallest possible working prototype: a local web app where you upload an audio
 file and the backend runs **real audio-to-pitch transcription** using
@@ -17,7 +17,11 @@ environments with newer Python versions.
 
 **What it does:**
 - Create a project
-- Upload an audio file (wav, mp3, flac, ogg, m4a, aiff)
+- Upload an audio file (wav, mp3, flac, ogg, m4a, aiff) — or **import from a YouTube
+  URL**: paste a link, confirm you have permission to process the content, and the app
+  extracts the audio (yt-dlp + ffmpeg → WAV) into the same private project storage and
+  transcribes it with the same pipeline. Videos over 10 minutes and live streams are
+  rejected; short clips work best
 - Run real pitch-tracking transcription on the uploaded audio (librosa pYIN, runs on CPU, no GPU/TensorFlow needed)
 - Generate a MIDI file and a JSON file listing every detected note (pitch, start time, duration, confidence)
 - Preview the transcription in the browser (simple piano-roll + note table)
@@ -241,6 +245,36 @@ contain the untouched detection regardless of the style toggle.
 | Undo all edits | POST | `/api/projects/{id}/notes/reset` |
 | Delete a project | DELETE | `/api/projects/{id}` |
 
+### Importing from YouTube (beginner steps)
+
+1. Create or open a project, and in the "Add audio" box click **Import from YouTube**
+2. Paste a normal YouTube video link (like `https://www.youtube.com/watch?v=…` or
+   `https://youtu.be/…`)
+3. Tick the confirmation box — *"I confirm I own this content or have permission to
+   process it for private transcription/arrangement use."* The import button stays
+   disabled until you do. BandChart AI does not publish, share or create a public library
+   from your transcription; everything stays in your own project storage
+4. Click **Import YouTube audio**. The app checks the link, extracts the audio, converts
+   it to WAV, and starts the transcription automatically — importing can take a minute
+5. From there everything works exactly like an uploaded file: preview, sheet music,
+   Play Along, note editing, and all four downloads
+
+Notes and limits:
+- YouTube import uses the same monophonic transcription engine. It works best on clear
+  single melody lines, not full band mixes
+- Videos longer than **10 minutes**, live streams, and playlist links are rejected
+- If a video is private, age-restricted, removed, or YouTube can't be reached, you'll get
+  a plain-English message saying so — your project's existing audio and results are never
+  touched by a failed import
+
+**YouTube import troubleshooting:**
+- *"yt-dlp library is missing"* — in the backend terminal (venv active) run
+  `pip install -r requirements.txt`, then restart the backend
+- *"ffmpeg is required"* — run `sudo apt-get update && sudo apt-get install -y ffmpeg`,
+  then restart the backend (Codespaces usually needs this once; see the ffmpeg note above)
+- *"Couldn't reach YouTube"* — the server's network may block YouTube, or the connection
+  dropped; try again, or download the audio yourself and use normal file upload
+
 ### Deleting a project (beginner steps)
 
 1. Go back to the project list (the "← Back to projects" link, or open http://localhost:3000)
@@ -298,6 +332,7 @@ All endpoints are under `/api`.
 | GET | `/projects` | List all projects |
 | GET | `/projects/{id}` | Get one project |
 | POST | `/projects/{id}/audio` | Upload audio (multipart field `file`) |
+| POST | `/projects/{id}/youtube` | Import audio from a YouTube URL — `{"url": string, "rights_confirmed": true}` |
 | POST | `/projects/{id}/transcribe` | Run transcription on the uploaded audio |
 | GET | `/projects/{id}/notes` | Get the detected-notes JSON |
 | GET | `/projects/{id}/audio` | Stream the original uploaded audio |
