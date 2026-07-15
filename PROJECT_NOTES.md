@@ -76,6 +76,18 @@ Explanations, error messages, and README instructions must stay beginner-friendl
 Not decided. Ask the owner. (Long-term list: full band charts, rehearsal packs, tabs —
 none approved; see out-of-scope below.)
 
+### v0.6.1 — YouTube blocked fallback (done)
+- YouTube frequently bot-blocks cloud/data-centre IPs (Codespaces included) — this is a
+  YouTube-side refusal, not an app bug. The error mapper now detects bot checks and
+  HTTP 403/429 responses (checked BEFORE the generic network branch, since these arrive
+  wrapped in "Unable to download API page: HTTP Error 403" text) and shows: "YouTube
+  blocked this cloud server from downloading the audio. This can happen in Codespaces.
+  Try another video, upload an audio file instead, or run the app locally."
+- UI: permanent note under the YouTube panel ("If YouTube blocks import, download or
+  record the audio yourself and use Upload audio file instead.") and a
+  "Switch to Upload audio file" button inside the error box for one-click fallback
+- README gained a "YouTube import limitations in Codespaces" section
+
 ### v0.6 — YouTube URL import (done)
 - `backend/app/youtube.py`: yt-dlp (pip dep) probes then downloads bestaudio and converts
   to WAV via the ffmpeg postprocessor. URL validation requires a real video reference
