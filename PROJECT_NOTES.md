@@ -72,10 +72,38 @@ Explanations, error messages, and README instructions must stay beginner-friendl
   "Sheet music style" radio toggle (Cleaned recommended/default vs Raw)
 - MIDI/JSON downloads intentionally stay raw — they're the faithful record
 
-### v0.6 — planned next
-Not decided; the owner has hinted YouTube import is next on their wish list, but it is NOT
-approved yet — ask before building it. (Long-term list also: full band charts, rehearsal
-packs, tabs; see out-of-scope below.)
+### v0.7 — planned next
+Not decided. Ask the owner. (Long-term list: full band charts, rehearsal packs, tabs —
+none approved; see out-of-scope below.)
+
+### v0.6 — YouTube URL import (done)
+- `backend/app/youtube.py`: yt-dlp (pip dep) probes then downloads bestaudio and converts
+  to WAV via the ffmpeg postprocessor. URL validation requires a real video reference
+  (watch?v=…, youtu.be/…, shorts/…; playlist-only watch?list= links rejected). Probe-stage
+  guards: live streams and unknown-duration videos rejected; >600s rejected. Downloads use
+  the RESOLVED entry URL + playlist_items="1" so a playlist can never expand
+- `POST /api/projects/{id}/youtube` {url, rights_confirmed}: 400s for empty/invalid URL or
+  unticked rights; friendly mapped errors for private/age-restricted/unavailable videos,
+  bot checks, network/blocked YouTube (502), and missing yt-dlp/ffmpeg (500 with install
+  commands). **Failed imports never touch existing work**: download goes to
+  project_dir/import-tmp and the old audio/outputs are cleared only after success
+  (temp → clear → move). A delete-during-import race is guarded: project existence is
+  rechecked before the final save so deleted projects can't resurrect
+- Project metadata: source_type ("upload"/"youtube"), source_url, rights_confirmed,
+  imported_at (optional fields; old projects parse fine). Upload sets source_type="upload"
+- Frontend: "Add audio" box has Upload/YouTube mode toggle; YouTube panel has URL input,
+  the exact rights checkbox wording, privacy + monophonic notes, button disabled until
+  URL+rights, import progress text, and auto-runs transcription on success. "Imported
+  from YouTube: <url>" shows in uploaded and transcribed views
+- **Test-only escape hatch**: BANDCHART_ALLOW_ANY_URL=1 lets automated tests feed the
+  endpoint a direct media URL (yt-dlp generic extractor) where youtube.com is blocked —
+  it also skips the unknown-duration rejection. NEVER set it in normal use; unset =
+  strict YouTube-only validation
+- Built under adversarial review (3-lens workflow): it caught the clear-before-download
+  data-loss bug, the live-stream duration bypass, the playlist expansion, the
+  delete-during-import resurrection, and a stale saveError in the frontend — all fixed
+  and re-verified. YouTube itself is unreachable from the dev sandbox, so the live-fetch
+  step was verified via the generic extractor; owner validates real YouTube in Codespaces
 
 ### v0.5.7 — safe project deletion (done)
 - `DELETE /api/projects/{id}` removes the project's whole storage folder
@@ -180,6 +208,12 @@ Next.js proxy, plus confirmed by the owner in Codespaces:
   resume continues; stop resets and clears highlights; 2s of wall clock advances the
   transport ~2s at 100% vs ~1s at 50%; count-in holds transport at 0 for the first ~2s;
   auto-stop fires at the end; all six download endpoints still 200 afterwards
+- v0.6 YouTube import: full pipeline via the test hatch (real yt-dlp download + ffmpeg
+  WAV conversion + transcription + all downloads); rights checkbox gates the button;
+  URL/rights/live/duration/playlist validation unit-tested; error-mapper unit-tested
+  against real yt-dlp error strings; failed import verified to leave an existing
+  transcription fully intact (notes/midi/audio/reset all 200 after a 502 import);
+  upload + note-edit + delete regressions re-run green in-browser
 - v0.5.7 delete: confirmation shows the exact agreed wording; cancel keeps the project;
   confirm removes it from the list immediately and survives a page refresh; the storage
   folder is gone from disk; other projects (sheet, downloads) unaffected; deleting an
@@ -241,6 +275,7 @@ the Next server proxies `/api/*` to the backend (see `frontend/next.config.ts`).
 backend/  FastAPI (Python 3.9+; owner's Codespace uses 3.12)
   app/main.py           all routes under /api; friendly error mapping
   app/transcription.py  pYIN engine — DO NOT swap without explicit request
+  app/youtube.py        yt-dlp/ffmpeg YouTube audio import (validation + guards)
   app/musicxml.py       music21 export + INSTRUMENTS table (style=clean|raw)
   app/notation_cleanup.py  wobble/merge/fragment/quantize pipeline for clean style
   app/pdf.py            verovio/cairosvg/pypdf PDF engraving (singleton toolkit + lock)

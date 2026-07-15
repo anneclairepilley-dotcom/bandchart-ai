@@ -9,3 +9,4 @@ music21
 verovio
 cairosvg
 pypdf
+yt-dlp

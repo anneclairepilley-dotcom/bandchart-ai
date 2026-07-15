@@ -25,6 +25,10 @@ export interface Project {
   audio_filename: string | null;
   note_count: number | null;
   error: string | null;
+  source_type?: "upload" | "youtube" | null;
+  source_url?: string | null;
+  rights_confirmed?: boolean | null;
+  imported_at?: string | null;
 }
 
 export interface Note {
@@ -131,6 +135,23 @@ export function uploadAudio(
 export function transcribeProject(projectId: string): Promise<Project> {
   return request<Project>(`/api/projects/${projectId}/transcribe`, {
     method: "POST",
+  });
+}
+
+/**
+ * Import the audio of a YouTube video into a project. The backend extracts
+ * the audio with yt-dlp, converts it to WAV, and stores it exactly like an
+ * uploaded file. Requires the rights confirmation to be true.
+ */
+export function importYoutube(
+  projectId: string,
+  url: string,
+  rightsConfirmed: boolean
+): Promise<Project> {
+  return request<Project>(`/api/projects/${projectId}/youtube`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url, rights_confirmed: rightsConfirmed }),
   });
 }
 
