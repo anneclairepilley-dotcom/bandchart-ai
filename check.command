@@ -31,7 +31,21 @@ echo
 check "Python 3" python3 "brew install python@3.11   (or download from https://www.python.org/downloads/)"
 check "Node.js" node "brew install node   (or download from https://nodejs.org/)"
 check "npm" npm "npm is installed together with Node.js — reinstall Node.js if this is missing"
-check "ffmpeg" ffmpeg "brew install ffmpeg   (only needed for mp3/m4a files — wav/flac/ogg work without it)"
+check "ffmpeg" ffmpeg "brew install ffmpeg   (needed for YouTube import and for mp3/m4a uploads)"
+
+# yt-dlp (YouTube import) lives inside the app's own Python environment,
+# which setup.command creates — so check there, not on the system.
+if [ -x "backend/.venv/bin/python" ]; then
+  if backend/.venv/bin/python -c "import yt_dlp" >/dev/null 2>&1; then
+    echo -e "${GREEN}[OK]${NC} yt-dlp (YouTube import) is installed in the app environment"
+  else
+    echo -e "${RED}[MISSING]${NC} yt-dlp is not in the app environment yet."
+    echo "         Double-click setup.command to install it."
+    all_ok=false
+  fi
+else
+  echo -e "${YELLOW}[LATER]${NC} yt-dlp (YouTube import) — installed automatically when you run setup.command."
+fi
 
 echo
 if $all_ok; then
