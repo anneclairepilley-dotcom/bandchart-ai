@@ -43,7 +43,25 @@ if [ ! -d ".venv" ]; then
   python3 -m venv .venv || fail "Could not create a Python virtual environment."
 fi
 ./.venv/bin/pip install --upgrade pip >/dev/null 2>&1
-./.venv/bin/pip install -r requirements.txt || fail "Installing backend dependencies failed. Check your internet connection and try running setup.command again."
+if ! ./.venv/bin/pip install -r requirements.txt; then
+  # The usual culprit on Macs is verovio (the optional PDF engraving engine),
+  # which sometimes has to compile from source and fails without Xcode tools.
+  # Everything except PDF export works without it, so retry without verovio
+  # rather than failing the whole setup.
+  echo
+  echo -e "${YELLOW}The full install failed — retrying without the optional PDF engine (verovio)…${NC}"
+  CORE_REQS="$(mktemp)"
+  grep -viE '^[[:space:]]*verovio' requirements.txt > "$CORE_REQS"
+  ./.venv/bin/pip install -r "$CORE_REQS" || { rm -f "$CORE_REQS"; fail "Installing backend dependencies failed. Check your internet connection and try running setup.command again."; }
+  rm -f "$CORE_REQS"
+  echo
+  echo -e "${YELLOW}Note:${NC} the optional PDF engine (verovio) couldn't be installed on this Mac."
+  echo "      Everything else works — transcription, YouTube import, sheet music in the"
+  echo "      browser, and MIDI/JSON/MusicXML downloads. For printable sheet music,"
+  echo "      download the MusicXML and open it in the free MuseScore app."
+  echo "      To enable PDFs here later: install Xcode Command Line Tools with"
+  echo "      'xcode-select --install', then run setup.command again."
+fi
 if ./.venv/bin/python -c "import yt_dlp" >/dev/null 2>&1; then
   echo -e "${GREEN}yt-dlp (YouTube import) installed.${NC}"
 else

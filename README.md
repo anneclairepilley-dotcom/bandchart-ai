@@ -72,7 +72,9 @@ It takes three double-clicks, described step by step in the next section:
 1. **`check.command`** — confirms Python, Node/npm, ffmpeg and yt-dlp are ready, with an
    install command for anything missing (ffmpeg matters: **YouTube import needs it**)
 2. **`setup.command`** — installs everything the app needs, including yt-dlp for YouTube
-   import (safe to run again any time)
+   import (safe to run again any time). If the optional PDF engine (verovio) can't be
+   built on your Mac, setup completes anyway with a fallback: everything works except the
+   PDF button, which will explain the alternative (MusicXML + free MuseScore app)
 3. **`start.command`** — starts the app and opens http://localhost:3000 in your browser
 
 ## Quick Start (Mac) — no coding required
@@ -316,6 +318,14 @@ happens you'll see: *"YouTube blocked this cloud server from downloading the aud
    own storage folder, never the app itself or your other projects
 
 ## Troubleshooting
+
+**Mac setup said the optional PDF engine (verovio) couldn't be installed.** Setup still
+completes and everything else works — transcription, YouTube import, the in-browser sheet
+music (which doesn't use verovio), and MIDI/JSON/MusicXML downloads. The PDF button will
+show a message pointing you to the alternative: download the MusicXML and open it in the
+free [MuseScore](https://musescore.org) app. To enable PDFs on the Mac, install Xcode
+Command Line Tools (`xcode-select --install` in Terminal — a few minutes), then run
+`setup.command` again.
 
 **PDF download fails with a message about "cairo".** The PDF engine uses a system library
 called cairo that is preinstalled in GitHub Codespaces and on most computers. If it's

@@ -76,6 +76,17 @@ Explanations, error messages, and README instructions must stay beginner-friendl
 Not decided. Ask the owner. (Long-term list: full band charts, rehearsal packs, tabs —
 none approved; see out-of-scope below.)
 
+### v0.6.2 — verovio made optional for Mac setup (done)
+- verovio sometimes has no wheel for a Mac's Python/OS combo and fails to compile
+  (clang++ error, usually missing Xcode CLT). It is ONLY used for server-side PDF
+  engraving — the browser sheet preview is OSMD (npm), unaffected
+- setup.command: if the full pip install fails, it retries with verovio filtered out and
+  finishes with a clear note (PDF disabled, MusicXML+MuseScore alternative, and the
+  xcode-select --install path to enable PDFs). requirements.txt still lists verovio so
+  Codespaces' single pip install keeps PDF working
+- pdf.py: `import verovio` failure now raises a friendly runtime message (surfaced by the
+  existing PDF-button error box); the cairo message is Codespaces/Mac aware
+
 ### v0.6.1 — YouTube blocked fallback (done)
 - YouTube frequently bot-blocks cloud/data-centre IPs (Codespaces included) — this is a
   YouTube-side refusal, not an app bug. The error mapper now detects bot checks and
