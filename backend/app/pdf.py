@@ -32,7 +32,20 @@ _toolkit_lock = threading.Lock()
 def _get_toolkit():
     global _toolkit
     if _toolkit is None:
-        import verovio
+        try:
+            import verovio
+        except ImportError as exc:
+            # verovio is optional: it needs a compiled wheel, which some Macs
+            # can't install. Everything except PDF export works without it.
+            raise RuntimeError(
+                "PDF export isn't available on this computer — the optional "
+                "'verovio' engraving engine isn't installed (it failed to build "
+                "during setup). Download the MusicXML instead and open it in the "
+                "free MuseScore app for printable sheet music. To enable PDFs "
+                "here: install Xcode Command Line Tools (run "
+                "'xcode-select --install' in Terminal), then run setup.command "
+                "again."
+            ) from exc
 
         tk = verovio.toolkit()
         tk.setOptions(VEROVIO_OPTIONS)
@@ -62,8 +75,9 @@ def musicxml_to_pdf(musicxml_path: Path, pdf_path: Path) -> Path:
     except OSError as exc:
         raise RuntimeError(
             "The PDF engine needs the 'cairo' system library, which wasn't found. "
-            "Run: sudo apt-get update && sudo apt-get install -y libcairo2 — then "
-            "restart the backend and try again."
+            "In Codespaces run: sudo apt-get update && sudo apt-get install -y "
+            "libcairo2 — on a Mac run: brew install cairo — then restart the "
+            "backend and try again."
         ) from exc
     from pypdf import PdfReader, PdfWriter
 
