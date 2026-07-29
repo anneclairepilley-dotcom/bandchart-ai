@@ -14,6 +14,7 @@ import {
   midiDownloadUrl,
   musicxmlDownloadUrl,
   resetNotes,
+  saveProjectSettings,
   suggestChords as suggestChordsApi,
   tabDownloadUrl,
   transcribeProject,
@@ -215,6 +216,41 @@ const ACCEPTED_EXTENSIONS = [
 ];
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
+type TranscriptionMode = "direct_transcription" | "solo_arrangement";
+
+const MODE_OPTIONS: {
+  key: TranscriptionMode;
+  label: string;
+  description: string;
+}[] = [
+  {
+    key: "direct_transcription",
+    label: "Direct transcription",
+    description: "Transcribe one clear instrument or voice.",
+  },
+  {
+    key: "solo_arrangement",
+    label: "Solo arrangement",
+    description:
+      "Turn the main melody into a playable solo piece for your chosen instrument.",
+  },
+];
+
+const TIME_SIGNATURE_OPTIONS = ["predict", "4/4", "3/4", "6/8"];
+const KEY_OPTIONS = [
+  "predict",
+  "C",
+  "G",
+  "D",
+  "A",
+  "F",
+  "Bb",
+  "Eb",
+  "Am",
+  "Em",
+  "Dm",
+];
+
 function TestFilesNote() {
   return (
     <div className="rounded border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
@@ -259,6 +295,19 @@ export default function ProjectDetailPage() {
   const [instrumentKey, setInstrumentKey] = useState("concert");
   const selectedInstrument =
     INSTRUMENTS.find((i) => i.key === instrumentKey) ?? INSTRUMENTS[0];
+
+  // ----- v0.9.1 pre-transcription setup (instrument, mode, advanced).
+  const [setupInstrument, setSetupInstrument] = useState<string | null>(null);
+  const [setupMode, setSetupMode] = useState<TranscriptionMode | null>(null);
+  const [setupTs, setSetupTs] = useState("predict");
+  const [setupKey, setSetupKey] = useState("predict");
+  const [setupRhythm, setSetupRhythm] = useState<"readable" | "precise">(
+    "readable"
+  );
+  const [setupError, setSetupError] = useState<string | null>(null);
+  // Guards Start transcription while the settings save is in flight (the
+  // transcribing flag only flips once the transcription request starts).
+  const [startBusy, setStartBusy] = useState(false);
 
   const [sheetStyle, setSheetStyle] = useState<SheetStyle>("clean");
 
@@ -617,6 +666,23 @@ export default function ProjectDetailPage() {
         if (!cancelled) {
           setProject(data);
           setLoadError(null);
+          // Adopt any setup choices already stored on the project.
+          if (
+            data.instrument &&
+            INSTRUMENTS.some((i) => i.key === data.instrument)
+          ) {
+            setSetupInstrument(data.instrument);
+            setInstrumentKey(data.instrument);
+          }
+          if (
+            data.mode === "direct_transcription" ||
+            data.mode === "solo_arrangement"
+          ) {
+            setSetupMode(data.mode);
+          }
+          if (data.time_signature) setSetupTs(data.time_signature);
+          if (data.key_signature) setSetupKey(data.key_signature);
+          if (data.rhythm_detail === "precise") setSetupRhythm("precise");
         }
       })
       .catch((err: unknown) => {
@@ -718,6 +784,7 @@ export default function ProjectDetailPage() {
       setChordSaveState("idle");
       setChordsError(null);
       setSuggestNote(null);
+      setSetupError(null);
       setFile(null);
       setReplacingAudio(false);
     } catch (err) {
@@ -728,6 +795,49 @@ export default function ProjectDetailPage() {
       );
     } finally {
       setUploading(false);
+    }
+  }
+
+  /** Validate the setup choices, save them, then run the transcription. */
+  async function handleStartTranscription() {
+    if (startBusy || transcribing) return; // no double-starts
+    if (!setupInstrument) {
+      setSetupError(
+        "Choose an instrument first — click one of the instrument cards above."
+      );
+      return;
+    }
+    if (!setupMode) {
+      setSetupError(
+        "Choose a transcription mode — Direct transcription or Solo arrangement."
+      );
+      return;
+    }
+    setSetupError(null);
+    setStartBusy(true);
+    try {
+      const updated = await saveProjectSettings(projectId, {
+        instrument: setupInstrument,
+        mode: setupMode,
+        time_signature: setupTs,
+        key_signature: setupKey,
+        rhythm_detail: setupRhythm,
+      });
+      setProject(updated);
+      setInstrumentKey(setupInstrument);
+    } catch (err) {
+      setSetupError(
+        err instanceof ApiError
+          ? err.message
+          : "Couldn't save the settings — check that the backend is running."
+      );
+      setStartBusy(false);
+      return;
+    }
+    try {
+      await handleTranscribe();
+    } finally {
+      setStartBusy(false);
     }
   }
 
@@ -777,11 +887,12 @@ export default function ProjectDetailPage() {
       setChordSaveState("idle");
       setChordsError(null);
       setSuggestNote(null);
+      setSetupError(null);
       setReplacingAudio(false);
       setYtUrl("");
       setYtRights(false);
-      // Go straight into transcription so the user lands on results.
-      void handleTranscribe();
+      // Land on the setup step (instrument, mode, advanced settings) —
+      // transcription starts when the user clicks Start transcription.
     } catch (err) {
       setYtError(
         err instanceof ApiError
@@ -797,6 +908,14 @@ export default function ProjectDetailPage() {
     workingNotes && workingNotes.length > 0
       ? Math.max(...workingNotes.map((n) => n.start_time + n.duration))
       : 0;
+
+  // Bar grid for chords/strip copy: 4/4 bars are 2s, 3/4 and 6/8 are 1.5s
+  // (fixed 120 BPM) — mirrors the backend's _project_seconds_per_bar.
+  const projectTimeSignature =
+    project?.time_signature === "3/4" || project?.time_signature === "6/8"
+      ? project.time_signature
+      : "4/4";
+  const secondsPerBar = projectTimeSignature === "4/4" ? 2 : 1.5;
 
   const showUploadForm =
     project?.status === "created" || replacingAudio;
@@ -950,7 +1069,8 @@ export default function ProjectDetailPage() {
             <p className="text-sm text-gray-500">
               Importing from YouTube — checking the link, extracting the audio
               and converting it to WAV… this can take a minute for longer
-              clips. Transcription starts automatically when it&apos;s done.
+              clips. When it&apos;s done you&apos;ll choose your instrument
+              and start the transcription.
             </p>
           )}
           {ytError && (
@@ -1051,7 +1171,7 @@ export default function ProjectDetailPage() {
 
       {project.status === "uploaded" && !replacingAudio && (
         <section className="rounded border border-gray-200 p-4">
-          <h2 className="mb-1 text-lg font-medium">Audio</h2>
+          <h2 className="mb-1 text-lg font-medium">Set up your sheet music</h2>
           {project.audio_filename && (
             <p className="mb-3 text-xs text-gray-500">
               {project.source_type === "youtube" && project.source_url
@@ -1062,17 +1182,166 @@ export default function ProjectDetailPage() {
           <audio controls src={audioUrl(projectId)} className="w-full">
             Your browser does not support the audio element.
           </audio>
-          <div className="mt-4 flex flex-wrap items-center gap-3">
+
+          <div className="mt-5">
+            <h3 className="mb-2 text-sm font-semibold">
+              1. Choose your instrument
+            </h3>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
+              {INSTRUMENTS.map((inst) => (
+                <button
+                  key={inst.key}
+                  type="button"
+                  onClick={() => {
+                    setSetupInstrument(inst.key);
+                    setSetupError(null);
+                  }}
+                  data-testid={`pick-${inst.key}`}
+                  className={`rounded border px-3 py-2 text-left text-sm ${
+                    setupInstrument === inst.key
+                      ? "border-blue-600 bg-blue-50 font-medium text-blue-900"
+                      : "border-gray-300 hover:bg-gray-50"
+                  }`}
+                >
+                  {inst.label}
+                  {inst.fretted && (
+                    <span className="block text-[11px] font-normal text-gray-500">
+                      shows TAB
+                    </span>
+                  )}
+                  {inst.key === "piano" && (
+                    <span className="block text-[11px] font-normal text-gray-500">
+                      grand staff
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-5">
+            <h3 className="mb-2 text-sm font-semibold">
+              2. How should we transcribe it?
+            </h3>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {MODE_OPTIONS.map((mode) => (
+                <button
+                  key={mode.key}
+                  type="button"
+                  onClick={() => {
+                    setSetupMode(mode.key);
+                    setSetupError(null);
+                  }}
+                  data-testid={`mode-${mode.key === "direct_transcription" ? "direct" : "solo"}`}
+                  className={`rounded border px-3 py-2 text-left ${
+                    setupMode === mode.key
+                      ? "border-blue-600 bg-blue-50"
+                      : "border-gray-300 hover:bg-gray-50"
+                  }`}
+                >
+                  <span className="block text-sm font-medium">
+                    {mode.label}
+                  </span>
+                  <span className="block text-xs text-gray-600">
+                    {mode.description}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <p className="mt-1 text-xs text-gray-500">
+              BandChart is melody-first. Full band separation is coming later.
+            </p>
+          </div>
+
+          <details className="mt-5 rounded border border-gray-200 p-3">
+            <summary className="cursor-pointer text-sm font-semibold">
+              3. Advanced settings (optional)
+            </summary>
+            <div className="mt-3 flex flex-col gap-3 text-sm">
+              <label className="flex items-center gap-2">
+                <span className="w-32 text-gray-600">Time signature</span>
+                <select
+                  value={setupTs}
+                  onChange={(e) => setSetupTs(e.target.value)}
+                  data-testid="setup-ts"
+                  className="rounded border border-gray-300 px-2 py-1"
+                >
+                  {TIME_SIGNATURE_OPTIONS.map((ts) => (
+                    <option key={ts} value={ts}>
+                      {ts === "predict"
+                        ? "Let us predict (assumes 4/4 for now)"
+                        : ts}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex items-center gap-2">
+                <span className="w-32 text-gray-600">Key signature</span>
+                <select
+                  value={setupKey}
+                  onChange={(e) => setSetupKey(e.target.value)}
+                  data-testid="setup-key"
+                  className="rounded border border-gray-300 px-2 py-1"
+                >
+                  {KEY_OPTIONS.map((k) => (
+                    <option key={k} value={k}>
+                      {k === "predict" ? "Let us predict" : k}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <fieldset>
+                <legend className="mb-1 text-gray-600">Rhythm detail</legend>
+                <div className="flex flex-col gap-1">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="rhythmDetail"
+                      checked={setupRhythm === "readable"}
+                      onChange={() => setSetupRhythm("readable")}
+                      data-testid="rhythm-readable"
+                    />
+                    Readable (recommended) — smoother, simpler notation
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="rhythmDetail"
+                      checked={setupRhythm === "precise"}
+                      onChange={() => setSetupRhythm("precise")}
+                      data-testid="rhythm-precise"
+                    />
+                    Precise — closer to the detected timings
+                  </label>
+                </div>
+              </fieldset>
+            </div>
+          </details>
+
+          <div className="mt-5 flex flex-wrap items-center gap-3">
             <button
               type="button"
-              onClick={handleTranscribe}
-              disabled={transcribing}
+              onClick={handleStartTranscription}
+              disabled={startBusy || transcribing}
+              data-testid="start-transcription"
               className="w-fit rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {transcribing ? "Transcribing…" : "Run Transcription"}
+              {transcribing
+                ? "Transcribing…"
+                : startBusy
+                  ? "Starting…"
+                  : "Start transcription"}
             </button>
             {startAgainButton}
           </div>
+          {setupError && (
+            <p
+              data-testid="setup-error"
+              className="mt-2 rounded border border-red-200 bg-red-50 p-2 text-sm text-red-700"
+            >
+              {setupError}
+            </p>
+          )}
           {transcribeProgress}
           {transcribeError && (
             <p className="mt-2 rounded border border-red-200 bg-red-50 p-2 text-sm text-red-700">
@@ -1132,6 +1401,12 @@ export default function ProjectDetailPage() {
             {project.source_type === "youtube" && project.source_url && (
               <p className="mt-1 text-xs text-gray-500">
                 Imported from YouTube: {project.source_url}
+              </p>
+            )}
+            {project.mode === "solo_arrangement" && (
+              <p className="mt-1 text-xs text-gray-600" data-testid="solo-badge">
+                Solo arrangement — the main melody arranged as a playable solo
+                for your instrument (melody-first).
               </p>
             )}
           </div>
@@ -1285,6 +1560,7 @@ export default function ProjectDetailPage() {
             <>
               <PlayAlong
                 notes={workingNotes}
+                instrumentKey={instrumentKey}
                 onTick={handlePlayTick}
                 autoScroll={autoScroll}
                 onAutoScrollChange={setAutoScroll}
@@ -1294,6 +1570,8 @@ export default function ProjectDetailPage() {
                 projectId={projectId}
                 chords={chords ?? []}
                 melodyEnd={melodyEnd}
+                secondsPerBar={secondsPerBar}
+                timeSignature={projectTimeSignature}
                 saveState={chordSaveState}
                 errorMessage={chordsError}
                 suggestBusy={suggestBusy}
@@ -1310,7 +1588,7 @@ export default function ProjectDetailPage() {
                   <h2 className="mb-2 text-lg font-medium">Tab output</h2>
                   {chords && chords.length > 0 && (
                     <>
-                      <ChordStrip chords={chords} melodyEnd={melodyEnd} />
+                      <ChordStrip chords={chords} melodyEnd={melodyEnd} secondsPerBar={secondsPerBar} />
                       <p className="mb-2 text-xs text-gray-500">
                         Chords are shown as names only for now — no strummed
                         chord shapes on the tab yet.
@@ -1335,11 +1613,11 @@ export default function ProjectDetailPage() {
                   {chords && chords.length > 0 && (
                     <>
                       <p className="mb-1 text-xs text-gray-600" data-testid="leadsheet-info">
-                        Lead sheet — {selectedInstrument.label}, 120 bpm, 4/4.
-                        Chord names appear above the staff and in the bar line
-                        below.
+                        Lead sheet — {selectedInstrument.label}, 120 bpm,{" "}
+                        {projectTimeSignature}. Chord names appear above the
+                        staff and in the bar line below.
                       </p>
-                      <ChordStrip chords={chords} melodyEnd={melodyEnd} />
+                      <ChordStrip chords={chords} melodyEnd={melodyEnd} secondsPerBar={secondsPerBar} />
                     </>
                   )}
                   <SheetMusic

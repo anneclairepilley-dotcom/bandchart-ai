@@ -98,7 +98,10 @@ def _best_octave_offset(pitches: list[int], strings: list[dict[str, Any]]) -> in
 
 
 def build_tab(
-    notes: list[dict[str, Any]], instrument_key: str, project_name: str
+    notes: list[dict[str, Any]],
+    instrument_key: str,
+    project_name: str,
+    seconds_per_bar: float = SECONDS_PER_MEASURE,
 ) -> dict[str, Any]:
     """Build the full tab: entries, warnings, preview cells and download text."""
     if instrument_key not in TUNINGS:
@@ -171,7 +174,7 @@ def build_tab(
             f"{label} in standard tuning — marked x in the tab ({details})."
         )
 
-    systems = _layout_systems(entries, strings)
+    systems = _layout_systems(entries, strings, seconds_per_bar)
 
     header_lines = [
         f"{project_name} — {label} tab",
@@ -203,7 +206,9 @@ def build_tab(
 
 
 def _layout_systems(
-    entries: list[dict[str, Any]], strings: list[dict[str, Any]]
+    entries: list[dict[str, Any]],
+    strings: list[dict[str, Any]],
+    seconds_per_bar: float = SECONDS_PER_MEASURE,
 ) -> list[list[list[dict[str, Any]]]]:
     """Lay entries out as wrapped tab systems.
 
@@ -216,7 +221,7 @@ def _layout_systems(
     columns: list[dict[str, Any]] = []
     prev_measure: Optional[int] = None
     for entry in entries:
-        measure = int(entry["start_time"] // SECONDS_PER_MEASURE)
+        measure = int(entry["start_time"] // seconds_per_bar)
         if prev_measure is not None and measure != prev_measure:
             columns.append({"bar": True, "width": 1})
         prev_measure = measure

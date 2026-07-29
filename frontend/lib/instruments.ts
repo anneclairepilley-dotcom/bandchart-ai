@@ -5,6 +5,14 @@
 // the pitch the player reads (B-flat and E-flat instruments are written
 // higher than they sound). 0 means written pitch equals concert pitch.
 
+/** Which little Web Audio patch Play Along uses for an instrument. */
+export type PlaybackPatch =
+  | "piano"
+  | "wind"
+  | "guitar"
+  | "bass"
+  | "uke";
+
 export interface InstrumentOption {
   key: string;
   label: string;
@@ -13,30 +21,35 @@ export interface InstrumentOption {
   fretted?: boolean;
   /** Standard tuning, shown with the tab output. */
   tuning?: string;
+  /** Play Along tone when the sound selector is on Auto. */
+  patch: PlaybackPatch;
 }
 
 export const INSTRUMENTS: InstrumentOption[] = [
-  { key: "concert", label: "Concert pitch", writtenOffset: 0 },
-  { key: "piano", label: "Piano", writtenOffset: 0 },
-  { key: "flute", label: "Flute", writtenOffset: 0 },
-  { key: "violin", label: "Violin", writtenOffset: 0 },
-  { key: "alto_sax", label: "Alto Sax (E♭)", writtenOffset: 9 },
-  { key: "tenor_sax", label: "Tenor Sax (B♭)", writtenOffset: 14 },
-  { key: "trumpet", label: "Trumpet (B♭)", writtenOffset: 2 },
-  { key: "clarinet", label: "Clarinet (B♭)", writtenOffset: 2 },
+  { key: "concert", label: "Concert pitch", writtenOffset: 0, patch: "piano" },
+  { key: "piano", label: "Piano", writtenOffset: 0, patch: "piano" },
+  { key: "flute", label: "Flute", writtenOffset: 0, patch: "wind" },
+  { key: "violin", label: "Violin", writtenOffset: 0, patch: "wind" },
+  { key: "voice", label: "Voice / Vocals", writtenOffset: 0, patch: "wind" },
+  { key: "alto_sax", label: "Alto Sax (E♭)", writtenOffset: 9, patch: "wind" },
+  { key: "tenor_sax", label: "Tenor Sax (B♭)", writtenOffset: 14, patch: "wind" },
+  { key: "trumpet", label: "Trumpet (B♭)", writtenOffset: 2, patch: "wind" },
+  { key: "clarinet", label: "Clarinet (B♭)", writtenOffset: 2, patch: "wind" },
   {
     key: "guitar",
     label: "Guitar",
     writtenOffset: 0,
     fretted: true,
     tuning: "E2 A2 D3 G3 B3 E4 (standard)",
+    patch: "guitar",
   },
   {
     key: "bass",
-    label: "Bass",
+    label: "Bass Guitar",
     writtenOffset: 0,
     fretted: true,
     tuning: "E1 A1 D2 G2 (standard)",
+    patch: "bass",
   },
   {
     key: "ukulele",
@@ -44,8 +57,14 @@ export const INSTRUMENTS: InstrumentOption[] = [
     writtenOffset: 0,
     fretted: true,
     tuning: "G4 C4 E4 A4 (standard, high G)",
+    patch: "uke",
   },
 ];
+
+/** Auto playback patch for an instrument key (piano-ish fallback). */
+export function patchForInstrument(instrumentKey: string): PlaybackPatch {
+  return INSTRUMENTS.find((i) => i.key === instrumentKey)?.patch ?? "piano";
+}
 
 const NOTE_NAMES = [
   "C",

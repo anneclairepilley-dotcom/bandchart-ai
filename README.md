@@ -2,7 +2,7 @@
 
 AI music arranging and rehearsal app that turns songs into editable lead sheets, solo sheets, band charts and custom arrangements.
 
-## v0.9 — Transcription + Solo Parts + Lead Sheets + Play Along + Note Editing + YouTube Import + Tab
+## v0.9.1 — A real sheet-music workflow: upload → pick instrument → readable notation
 
 This is the smallest possible working prototype: a local web app where you upload an audio
 file and the backend runs **real audio-to-pitch transcription** using
@@ -16,18 +16,25 @@ no TensorFlow — so it installs reliably everywhere, including GitHub Codespace
 environments with newer Python versions.
 
 **What it does:**
-- Create a project
-- Upload an audio file (wav, mp3, flac, ogg, m4a, aiff) — or **import from a YouTube
-  URL**: paste a link, confirm you have permission to process the content, and the app
-  extracts the audio (yt-dlp + ffmpeg → WAV) into the same private project storage and
-  transcribes it with the same pipeline. Videos over 10 minutes and live streams are
-  rejected; short clips work best
+- **Clean home screen** (v0.9.1): "Turn sound into sheet music" — upload an audio file
+  (wav, mp3, flac, ogg, m4a, aiff) or paste a **YouTube URL** (with the same rights
+  confirmation as before) straight from the home page; a project is created for you
+  (YouTube projects are even named after the video). Videos over 10 minutes and live
+  streams are rejected; short clips work best
+- **Setup step before transcribing** (v0.9.1): pick your instrument from a grid
+  (including the new **Voice / Vocals**), choose **Direct transcription** ("transcribe
+  one clear instrument or voice") or **Solo arrangement** ("turn the main melody into a
+  playable solo piece for your chosen instrument" — labelled as melody-first, because
+  BandChart is melody-first and full band separation is coming later), and optionally
+  open **Advanced settings**: time signature (Let us predict — currently assumes 4/4 —
+  or 4/4, 3/4, 6/8), key signature (Let us predict or C/G/D/A/F/Bb/Eb/Am/Em/Dm) and
+  **Rhythm detail** (Readable, the default, or Precise)
 - Run real pitch-tracking transcription on the uploaded audio (librosa pYIN, runs on CPU, no GPU/TensorFlow needed)
 - Generate a MIDI file and a JSON file listing every detected note (pitch, start time, duration, confidence)
 - Preview the transcription in the browser (simple piano-roll + note table)
-- Pick a solo instrument (concert pitch, piano, flute, violin, alto sax, tenor sax, trumpet,
-  clarinet, guitar, bass, ukulele) — the note table shows both the detected concert pitch
-  and the written pitch, transposed for E♭/B♭ instruments
+- Pick a solo instrument (concert pitch, piano, flute, violin, voice/vocals, alto sax,
+  tenor sax, trumpet, clarinet, guitar, bass guitar, ukulele) — the note table shows both
+  the detected concert pitch and the written pitch, transposed for E♭/B♭ instruments
 - **Tablature for guitar, bass and ukulele** (v0.7): picking one of the fretted
   instruments swaps the sheet-music view for a plain text-style **tab preview** —
   string lines with fret numbers in standard tuning, built from the same detected
@@ -42,14 +49,26 @@ environments with newer Python versions.
   written for the chosen instrument
 - Choose between two sheet-music styles: **Cleaned sheet music** (default — smooths pitch
   wobbles, merges repeated fragments, drops noise blips, snaps rhythm to an eighth-note
-  grid, and adds an estimated key signature so most notes engrave without accidentals) or
+  grid, and adds a key signature — your chosen one, or an estimated one) or
   **Raw transcription** (every detected note, literally, on a sixteenth grid)
+- **Readable rhythm** (v0.9.1, default): the cleaned sheet gets a second smoothing pass —
+  starts snap to the beat grid, durations become simple values (quavers, crotchets,
+  dotted crotchets, minims, dotted minims, semibreves — long held notes stay long and
+  tie naturally), and tiny awkward rests are absorbed. On real melodies this typically
+  removes ALL stray sixteenths and ties. Pick **Precise** in Advanced settings to stay
+  closer to the detected timings, or Raw for the literal record
+- **Piano grand staff** (v0.9.1): choosing Piano engraves a proper two-staff system —
+  treble and bass clef joined by a brace, split around middle C, with rests filling
+  whichever side has no melody — in the browser, the MusicXML and the PDF
 - **Play Along mode**: hear the transcribed notes in the browser with Play/Pause/Stop, a
   moving playhead and current-note highlighting, playback speeds of 50/75/100/125%, an
   optional 4-click count-in, and a running time display (playback uses the generated
   transcription, not the original audio)
-- **Three playback sounds** — Piano-ish (default), Soft synth, Pluck — softer little
-  synthesizer voices instead of harsh beeps
+- **Per-instrument playback sounds** (v0.9.1): the Sound selector defaults to **Auto
+  (match instrument)** — piano gets the soft piano-ish tone, guitar a warm pluck, bass a
+  deep dark pluck, ukulele a light quick pluck, and flute/violin/sax/trumpet/clarinet/
+  voice a breathy sustained tone. Piano-ish/Soft synth/Pluck remain as manual choices —
+  all gentle little Web Audio patches, never harsh beeps
 - **Sheet music in the browser**: the generated notation renders right on the project page
   (via OpenSheetMusicDisplay), for the selected instrument and style — and it's the main
   play-along surface: a thin **blue playhead** glides continuously through the notes as
@@ -68,10 +87,13 @@ environments with newer Python versions.
   C, Am, F#m7, Bb, G/B and so on — with a beginner-friendly Chords section (add, edit,
   delete, reset). Chords appear engraved above the staff (the sheet becomes a simple
   **lead sheet**), in a bar-grid chord line, in the JSON, in the MusicXML/PDF, and in a
-  plain-text **Download Chord Chart**. A clearly-labelled **Suggest chords from melody
-  (rough)** button proposes simple diatonic chords as a starting point — this is NOT
-  automatic chord detection from the recording; the app still hears one melody line at
-  a time, and suggestions must be checked and edited
+  plain-text **Download Chord Chart**. The **Suggest chords from melody (rough)**
+  button proposes simple diatonic chords as a starting point — smarter in v0.9.1: it
+  follows your chosen key from Advanced settings, adds a V7 (like G7) where the
+  seventh is clearly present, and if the key is genuinely unclear it says so and
+  falls back to C major. This is still NOT automatic chord detection from the
+  recording; the app hears one melody line at a time, and suggestions must always be
+  checked and edited
 - **Delete projects**: a Delete button beside each project on the dashboard removes the
   project with its uploaded audio and generated files, after a confirmation prompt
 
@@ -469,6 +491,7 @@ All endpoints are under `/api`.
 | GET | `/projects/{id}` | Get one project |
 | POST | `/projects/{id}/audio` | Upload audio (multipart field `file`) |
 | POST | `/projects/{id}/youtube` | Import audio from a YouTube URL — `{"url": string, "rights_confirmed": true}` |
+| POST | `/projects/{id}/settings` | Save the setup choices — `{"instrument", "mode", "time_signature", "key_signature", "rhythm_detail"}` |
 | POST | `/projects/{id}/transcribe` | Run transcription on the uploaded audio |
 | GET | `/projects/{id}/notes` | Get the detected-notes JSON |
 | GET | `/projects/{id}/audio` | Stream the original uploaded audio |

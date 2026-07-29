@@ -14,11 +14,19 @@ from fastapi.responses import FileResponse, JSONResponse
 from app import storage
 from app.chords import (
     CHORD_NAME_HELP,
+    KEY_CHOICES,
     chord_chart_text,
     is_valid_chord_name,
     suggest_chords,
 )
-from app.models import ChordsUpdate, NotesUpdate, Project, ProjectCreate, YoutubeImport
+from app.models import (
+    ChordsUpdate,
+    NotesUpdate,
+    Project,
+    ProjectCreate,
+    ProjectSettings,
+    YoutubeImport,
+)
 from app.musicxml import INSTRUMENTS, notes_to_musicxml
 from app.pdf import musicxml_to_pdf
 from app.tablature import TUNINGS, build_tab
@@ -49,10 +57,70 @@ AUDIO_CONTENT_TYPES = {
 }
 
 
+VALID_MODES = {"direct_transcription", "solo_arrangement"}
+VALID_TIME_SIGNATURES = {"predict", "4/4", "3/4", "6/8"}
+VALID_RHYTHM_DETAILS = {"readable", "precise"}
+# Quarter notes per bar at the fixed 120 BPM (0.5s per quarter).
+_BAR_SECONDS = {"4/4": 2.0, "3/4": 1.5, "6/8": 1.5}
+
+
 def _get_project_or_404(project_id: str) -> Project:
     project = storage.load_project(project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
+    return project
+
+
+def _project_time_signature(project: Project) -> str:
+    ts = project.time_signature
+    return ts if ts in ("4/4", "3/4", "6/8") else "4/4"
+
+
+def _project_seconds_per_bar(project: Project) -> float:
+    return _BAR_SECONDS[_project_time_signature(project)]
+
+
+@app.post("/api/projects/{project_id}/settings", response_model=Project)
+def set_project_settings(project_id: str, body: ProjectSettings) -> Project:
+    """Store the pre-transcription choices: instrument, mode, advanced settings."""
+    project = _get_project_or_404(project_id)
+    if body.instrument not in INSTRUMENTS:
+        raise HTTPException(
+            status_code=400,
+            detail="Please choose an instrument first — "
+            f"'{body.instrument}' isn't one of the supported instruments.",
+        )
+    if body.mode not in VALID_MODES:
+        raise HTTPException(
+            status_code=400,
+            detail="Please choose a transcription mode first — either "
+            "direct transcription or solo arrangement.",
+        )
+    if body.time_signature not in VALID_TIME_SIGNATURES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{body.time_signature}' isn't a supported time signature. "
+            "Choose Let us predict, 4/4, 3/4 or 6/8.",
+        )
+    if body.key_signature != "predict" and body.key_signature not in KEY_CHOICES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{body.key_signature}' isn't a supported key. Choose Let us "
+            "predict or one of: " + ", ".join(KEY_CHOICES) + ".",
+        )
+    if body.rhythm_detail not in VALID_RHYTHM_DETAILS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{body.rhythm_detail}' isn't a rhythm detail option. "
+            "Choose Readable or Precise.",
+        )
+    project.instrument = body.instrument
+    project.mode = body.mode
+    project.time_signature = body.time_signature
+    project.key_signature = body.key_signature
+    project.rhythm_detail = body.rhythm_detail
+    project.updated_at = storage.now_iso()
+    storage.save_project(project)
     return project
 
 
@@ -208,7 +276,7 @@ def import_youtube(project_id: str, body: YoutubeImport) -> Project:
     tmp_dir = storage.project_dir(project_id) / "import-tmp"
     shutil.rmtree(tmp_dir, ignore_errors=True)
     try:
-        saved_filename, _info = download_audio_as_wav(url, tmp_dir)
+        saved_filename, info = download_audio_as_wav(url, tmp_dir)
     except YoutubeImportError as exc:
         shutil.rmtree(tmp_dir, ignore_errors=True)
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
@@ -242,6 +310,9 @@ def import_youtube(project_id: str, body: YoutubeImport) -> Project:
     project.source_url = url
     project.rights_confirmed = True
     project.imported_at = storage.now_iso()
+    # Projects auto-created by the home screen get the video's real title.
+    if project.name == "YouTube import" and (info or {}).get("title"):
+        project.name = str(info["title"])[:200]
     storage.save_project(project)
     return project
 
@@ -403,7 +474,7 @@ def update_chords(project_id: str, body: ChordsUpdate) -> JSONResponse:
 @app.post("/api/projects/{project_id}/chords/suggest")
 def suggest_project_chords(project_id: str) -> JSONResponse:
     """Rough diatonic chord suggestions from the current melody (replaces the list)."""
-    _get_project_or_404(project_id)
+    project = _get_project_or_404(project_id)
     data = _load_transcription_or_404(project_id)
     if not data.get("notes"):
         raise HTTPException(
@@ -411,21 +482,34 @@ def suggest_project_chords(project_id: str) -> JSONResponse:
             detail="There are no melody notes to suggest chords from — transcribe "
             "some audio (or add notes) first.",
         )
+    chosen_key = (
+        project.key_signature
+        if project.key_signature and project.key_signature != "predict"
+        else None
+    )
     try:
-        suggestions = suggest_chords(data["notes"])
+        suggestions, uncertain = suggest_chords(
+            data["notes"],
+            key_name=chosen_key,
+            seconds_per_bar=_project_seconds_per_bar(project),
+        )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=500,
             detail=f"Couldn't suggest chords ({exc}). You can still add chords by hand.",
         ) from exc
     data = _save_chords(project_id, suggestions)
-    return JSONResponse(
-        content={
-            "chords": data["chords"],
-            "message": "Chord suggestions are a rough starting point. "
-            "Please check and edit them.",
-        }
+    message = (
+        "Chord suggestions are a rough starting point. Please check and edit them."
     )
+    if chosen_key:
+        message += f" (Using your chosen key: {chosen_key}.)"
+    elif uncertain:
+        message += (
+            " The key was hard to detect from this melody, so C major was "
+            "assumed — treat these as extra rough."
+        )
+    return JSONResponse(content={"chords": data["chords"], "message": message})
 
 
 @app.get("/api/projects/{project_id}/download/chords")
@@ -442,7 +526,13 @@ def download_chord_chart(project_id: str) -> FileResponse:
     notes = data.get("notes", [])
     melody_end = max((n["start_time"] + n["duration"] for n in notes), default=0.0)
     try:
-        text = chord_chart_text(project.name, chords, melody_end)
+        text = chord_chart_text(
+            project.name,
+            chords,
+            melody_end,
+            time_signature=_project_time_signature(project),
+            seconds_per_bar=_project_seconds_per_bar(project),
+        )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=500,
@@ -500,7 +590,12 @@ def _build_tab_or_error(project_id: str, instrument: str) -> dict:
         raise HTTPException(status_code=404, detail="Project has not been transcribed yet")
     data = json.loads(json_p.read_text())
     try:
-        return build_tab(data["notes"], instrument, project.name)
+        return build_tab(
+            data["notes"],
+            instrument,
+            project.name,
+            seconds_per_bar=_project_seconds_per_bar(project),
+        )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=500,
@@ -557,6 +652,16 @@ def _generate_musicxml_or_error(project_id: str, instrument: str, style: str) ->
             out_path=out_p,
             style=style,
             chords=data.get("chords", []),
+            rhythm_detail=project.rhythm_detail or "readable",
+            time_signature=_project_time_signature(project),
+            key_signature=(
+                project.key_signature
+                if project.key_signature and project.key_signature != "predict"
+                else None
+            ),
+            arrangement_label=(
+                "solo arrangement" if project.mode == "solo_arrangement" else None
+            ),
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(

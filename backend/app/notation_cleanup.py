@@ -148,6 +148,91 @@ def quantize(notes: list[Note], settings: CleanupSettings) -> list[Note]:
     return cleaned
 
 
+# Note lengths a beginner/intermediate reader is comfortable with, in
+# quarter lengths: quaver, crotchet, dotted crotchet, minim, dotted minim,
+# semibreve. Deliberately no sixteenths and no dotted quavers.
+READABLE_DURATIONS_QL = (0.5, 1.0, 1.5, 2.0, 3.0, 4.0)
+
+
+def make_readable(
+    notes: list[Note], settings: CleanupSettings | None = None
+) -> list[Note]:
+    """Extra pass for the default "Readable" rhythm detail (v0.9.1).
+
+    Runs AFTER clean_notes and pushes the timing further toward something a
+    human would write down:
+    - starts snap to the eighth grid (which also lands nearly-on-the-beat
+      notes exactly on the beat)
+    - durations snap to the nearest simple value (quaver, crotchet, dotted
+      crotchet, minim, dotted minim, semibreve); anything LONGER than a
+      semibreve keeps its grid-rounded length so long held notes are tied
+      across bars by the engraver instead of being truncated
+    - a gap of up to one quaver before the next note is absorbed by
+      extending the note, as long as that still gives a simple length —
+      so tiny awkward rests disappear
+    - overlaps created by the snapping are clipped; two notes snapped into
+      the same slot keep the earlier one (the codebase-wide convention)
+
+    "Precise" mode skips this pass and keeps clean_notes' literal grid.
+    """
+    settings = settings or CleanupSettings()
+    spq = settings.seconds_per_quarter
+    longest_simple = READABLE_DURATIONS_QL[-1]
+
+    snapped: list[Note] = []
+    for note in notes:
+        start = round((note["start_time"] / spq) * 2) / 2  # eighth grid
+
+        duration_ql = note["duration"] / spq
+        if duration_ql > longest_simple:
+            # Long held note: keep it (rounded to the eighth grid), never
+            # truncate it down to a semibreve.
+            duration = max(0.5, round(duration_ql * 2) / 2)
+        else:
+            duration = min(READABLE_DURATIONS_QL, key=lambda v: abs(v - duration_ql))
+        snapped.append(
+            _make_note(note["pitch"], start * spq, duration * spq, note["confidence"])
+        )
+
+    # Same-slot collisions keep the EARLIER note (starts are monotone after
+    # rounding, so equal starts are adjacent).
+    deduped: list[Note] = []
+    for note in snapped:
+        if deduped and note["start_time"] <= deduped[-1]["start_time"] + 1e-9:
+            continue
+        deduped.append(note)
+
+    result: list[Note] = []
+    for index, note in enumerate(deduped):
+        start_ql = note["start_time"] / spq
+        duration_ql = note["duration"] / spq
+        next_start_ql = (
+            deduped[index + 1]["start_time"] / spq if index + 1 < len(deduped) else None
+        )
+        if next_start_ql is not None:
+            room = next_start_ql - start_ql
+            if duration_ql > room:
+                duration_ql = room  # clip overlaps
+            else:
+                gap = room - duration_ql
+                # Absorb a quaver-or-smaller rest when the stretched length
+                # is still simple (or already long enough that it ties anyway).
+                if 0 < gap <= 0.5 and (
+                    room in READABLE_DURATIONS_QL or room > longest_simple
+                ):
+                    duration_ql = room
+        if duration_ql < 0.5:
+            duration_ql = 0.5
+            if next_start_ql is not None and start_ql + duration_ql > next_start_ql:
+                continue  # no room for even a quaver without overlapping
+        result.append(
+            _make_note(
+                note["pitch"], start_ql * spq, duration_ql * spq, note["confidence"]
+            )
+        )
+    return result
+
+
 def clean_notes(
     notes: list[Note], settings: CleanupSettings | None = None
 ) -> list[Note]:

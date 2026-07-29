@@ -2,9 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Note } from "@/lib/api";
+import { patchForInstrument, type PlaybackPatch } from "@/lib/instruments";
 
 interface PlayAlongProps {
   notes: Note[];
+  /** Selected instrument key — picks the playback tone when Sound is Auto. */
+  instrumentKey: string;
   /**
    * Called every animation frame while playing (and once on pause/stop) with
    * the transport position in seconds and the index of the sounding note.
@@ -16,7 +19,9 @@ interface PlayAlongProps {
 }
 
 type Status = "stopped" | "playing" | "paused";
-export type Voice = "piano" | "soft" | "pluck";
+export type Voice = "auto" | "piano" | "soft" | "pluck";
+/** The actual little synth patches (Voice "auto" resolves to one of these). */
+type Patch = PlaybackPatch | "soft" | "pluck";
 
 const SPEEDS = [0.5, 0.75, 1, 1.25];
 const LOOKAHEAD_S = 0.25; // schedule notes this far ahead (wall-clock)
@@ -25,6 +30,7 @@ const BEAT_S = 0.5; // the exporter's fixed 120 BPM
 const NOTE_GAIN = 0.25;
 
 const VOICES: { key: Voice; label: string }[] = [
+  { key: "auto", label: "Auto (match instrument)" },
   { key: "piano", label: "Piano-ish" },
   { key: "soft", label: "Soft synth" },
   { key: "pluck", label: "Pluck" },
@@ -49,6 +55,7 @@ function formatTime(seconds: number): string {
 
 export default function PlayAlong({
   notes,
+  instrumentKey,
   onTick,
   autoScroll,
   onAutoScrollChange,
@@ -56,14 +63,21 @@ export default function PlayAlong({
   const [status, setStatus] = useState<Status>("stopped");
   const [rate, setRate] = useState(1);
   const [countIn, setCountIn] = useState(true);
-  const [voice, setVoice] = useState<Voice>("piano");
+  const [voice, setVoice] = useState<Voice>("auto");
   const [positionDisplay, setPositionDisplay] = useState(0);
 
   const ctxRef = useRef<AudioContext | null>(null);
   const anchorCtxTimeRef = useRef(0);
   const anchorPosRef = useRef(0);
   const rateRef = useRef(1);
-  const voiceRef = useRef<Voice>("piano");
+  const patchRef = useRef<Patch>(patchForInstrument(instrumentKey));
+
+  // Resolve which little synth patch actually sounds: Auto follows the
+  // selected instrument; the explicit options behave as before.
+  useEffect(() => {
+    patchRef.current =
+      voice === "auto" ? patchForInstrument(instrumentKey) : voice;
+  }, [voice, instrumentKey]);
   const pointerRef = useRef(0);
   const activeNodesRef = useRef<ActiveNode[]>([]);
   const rafRef = useRef<number | null>(null);
@@ -124,12 +138,15 @@ export default function PlayAlong({
   /**
    * Softer musical voices. Each is a tiny additive patch through a lowpass
    * filter with a gain envelope — nothing fancy, just not a raw beep.
+   * v0.9.1: per-instrument patches (guitar/bass/uke plucks, a breathier
+   * "wind" tone for flute/violin/sax/trumpet/clarinet/voice) chosen
+   * automatically when the Sound selector is on Auto.
    */
   const scheduleNoteSound = useCallback(
     (freq: number, when: number, wallDuration: number) => {
       const ctx = ctxRef.current;
       if (!ctx) return;
-      const v = voiceRef.current;
+      const patch = patchRef.current;
       const gain = ctx.createGain();
       const filter = ctx.createBiquadFilter();
       filter.type = "lowpass";
@@ -152,7 +169,7 @@ export default function PlayAlong({
 
       const end = when + wallDuration;
       const g = gain.gain;
-      if (v === "piano") {
+      if (patch === "piano") {
         // Fundamental + quiet octave, percussive attack, decaying body.
         filter.frequency.value = 2600;
         addOsc("triangle", freq, 1);
@@ -164,16 +181,53 @@ export default function PlayAlong({
           Math.max(when + 0.02, end - 0.05)
         );
         g.linearRampToValueAtTime(0, end);
-      } else if (v === "soft") {
-        // Two barely-detuned sines, slow attack and release.
-        filter.frequency.value = 1800;
+      } else if (patch === "soft" || patch === "wind") {
+        // Barely-detuned sines, slow attack and release; "wind" adds a
+        // whisper of second harmonic for flutes/horns/voice.
+        filter.frequency.value = patch === "wind" ? 2100 : 1800;
         addOsc("sine", freq, 0.7);
         addOsc("sine", freq * 1.003, 0.5);
+        if (patch === "wind") {
+          addOsc("sine", freq * 2, 0.12);
+        }
         const attack = Math.min(0.08, wallDuration / 3);
         const release = Math.min(0.1, wallDuration / 3);
         g.setValueAtTime(0, when);
         g.linearRampToValueAtTime(NOTE_GAIN, when + attack);
         g.setValueAtTime(NOTE_GAIN, end - release);
+        g.linearRampToValueAtTime(0, end);
+      } else if (patch === "guitar") {
+        // Warm pluck: rounder filter, longer singing decay than raw pluck.
+        filter.frequency.value = 1900;
+        addOsc("triangle", freq, 1);
+        addOsc("sine", freq * 2, 0.25);
+        const decay = Math.min(1.1, Math.max(0.35, wallDuration + 0.25));
+        g.setValueAtTime(0, when);
+        g.linearRampToValueAtTime(NOTE_GAIN, when + 0.008);
+        g.exponentialRampToValueAtTime(0.012, when + decay);
+        g.linearRampToValueAtTime(0, end);
+      } else if (patch === "bass") {
+        // Deep and soft: mostly fundamental through a dark filter.
+        filter.frequency.value = 750;
+        addOsc("sine", freq, 1);
+        addOsc("triangle", freq, 0.35);
+        addOsc("sine", freq * 2, 0.15);
+        g.setValueAtTime(0, when);
+        g.linearRampToValueAtTime(NOTE_GAIN * 1.15, when + 0.012);
+        g.exponentialRampToValueAtTime(
+          Math.max(0.02, NOTE_GAIN * 0.35),
+          Math.max(when + 0.03, end - 0.06)
+        );
+        g.linearRampToValueAtTime(0, end);
+      } else if (patch === "uke") {
+        // Light, quick pluck.
+        filter.frequency.value = 2600;
+        addOsc("triangle", freq, 1);
+        addOsc("sine", freq * 2, 0.2);
+        const decay = Math.min(0.5, Math.max(0.16, wallDuration * 0.7));
+        g.setValueAtTime(0, when);
+        g.linearRampToValueAtTime(NOTE_GAIN, when + 0.005);
+        g.exponentialRampToValueAtTime(0.01, when + decay);
         g.linearRampToValueAtTime(0, end);
       } else {
         // Pluck: fast decay regardless of note length.
@@ -352,7 +406,6 @@ export default function PlayAlong({
 
   const handleVoiceChange = useCallback((v: Voice) => {
     setVoice(v);
-    voiceRef.current = v;
   }, []);
 
   // Full cleanup when the component unmounts or the notes change (a note

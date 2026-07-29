@@ -29,6 +29,21 @@ export interface Project {
   source_url?: string | null;
   rights_confirmed?: boolean | null;
   imported_at?: string | null;
+  // v0.9.1 setup choices (absent/null on older projects).
+  instrument?: string | null;
+  mode?: "direct_transcription" | "solo_arrangement" | null;
+  time_signature?: string | null;
+  key_signature?: string | null;
+  rhythm_detail?: "readable" | "precise" | null;
+}
+
+/** Pre-transcription choices saved via POST /projects/{id}/settings. */
+export interface ProjectSettingsPayload {
+  instrument: string;
+  mode: "direct_transcription" | "solo_arrangement";
+  time_signature: string;
+  key_signature: string;
+  rhythm_detail: "readable" | "precise";
 }
 
 export interface Note {
@@ -143,6 +158,18 @@ export function uploadAudio(
 export function transcribeProject(projectId: string): Promise<Project> {
   return request<Project>(`/api/projects/${projectId}/transcribe`, {
     method: "POST",
+  });
+}
+
+/** Save the instrument / mode / advanced-settings choices for a project. */
+export function saveProjectSettings(
+  projectId: string,
+  settings: ProjectSettingsPayload
+): Promise<Project> {
+  return request<Project>(`/api/projects/${projectId}/settings`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings),
   });
 }
 

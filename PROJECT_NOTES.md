@@ -1,6 +1,6 @@
 # BandChart AI — Project Notes
 
-Living notes for contributors (human or AI). Last updated after v0.9 (2026-07).
+Living notes for contributors (human or AI). Last updated after v0.9.1 (2026-07).
 If you are a new Claude Code session: read this file, then README.md, before changing code.
 
 ## Purpose
@@ -176,11 +176,57 @@ Explanations, error messages, and README instructions must stay beginner-friendl
 - Chords for fretted instruments stay names-only (strip above the tab) — no strummed
   chord shapes/diagrams yet, stated in the UI
 
+### v0.9.1 — real sheet-music workflow (done)
+- **Home hero** (app/page.tsx): "Turn sound into sheet music", central upload + YouTube
+  (rights checkbox kept) — auto-creates a project (named from the filename, or renamed
+  to the video title when the auto-name "YouTube import" is still in place) and routes
+  to the project page. Failed hero uploads/imports delete the half-made project. No
+  record button (recording isn't supported — don't pretend)
+- **Setup step** (project page, status "uploaded"): instrument grid (INSTRUMENTS now
+  12 keys — added `voice` / Voice / Vocals, m21 Vocalist, offset 0; NO drums — the
+  engine can't do them), mode cards (`direct_transcription` | `solo_arrangement`) with
+  the required "BandChart is melody-first. Full band separation is coming later." note,
+  Advanced settings (time signature predict/4-4/3-4/6-8 — predict currently means 4/4
+  and the option label says so; key predict/C/G/D/A/F/Bb/Eb/Am/Em/Dm; rhythm detail
+  readable|precise, readable default). Start transcription = POST /settings (validated
+  400s) then POST /transcribe; button guarded by a startBusy state (double-click safe).
+  YouTube import from the project page NO LONGER auto-transcribes — it lands on this
+  setup step. Settings live on the Project model (all Optional, old projects fine)
+- **Readable rhythm** (notation_cleanup.make_readable, runs after clean_notes when
+  rhythm_detail != "precise"): eighth-grid start snapping, durations snapped to
+  (0.5, 1, 1.5, 2, 3, 4) ql — but durations LONGER than 4 ql keep their grid-rounded
+  length so held notes tie instead of truncating; quaver-or-smaller gaps absorbed when
+  the stretch stays simple; same-slot collisions keep the EARLIER note. On the test
+  melodies: 0 ties / 0 sixteenths vs raw's 16 / 9. Playback/tab/JSON stay raw
+- **Piano grand staff** (musicxml.py): two stream.PartStaff joined by layout.StaffGroup
+  (brace), split at middle C (>= 60 treble), explicit clefs, chords on the treble
+  staff. **Gotcha (hard-won, adversarial review):** BOTH staves must be padded with
+  trailing rests to the same ceil-to-bar length — if one staff ends earlier,
+  makeNotation emits different measure counts per staff, silently drops/misplaces
+  harmony symbols and draws a final barline mid-piece
+- **Settings plumbing**: time signature drives meter + bar length EVERYWHERE (4/4=2s,
+  3/4 & 6/8=1.5s: chord chart, suggest windows, tab bar lines via seconds_per_bar
+  params, frontend ChordStrip/ChordsPanel via secondsPerBar prop); chosen key drives
+  the engraved KeySignature (KEY_SHARPS) and chord suggestions; solo_arrangement adds
+  "(solo arrangement)" to the engraved title + a badge in the UI
+- **Chord suggest upgrades** (chords.py): key_name forcing, major-key V→V7 when the
+  bar clearly holds the seventh, uncertainty flag (correlationCoefficient < 0.5 —
+  calibrated: clean tonal melodies ~0.65-0.9, noise ~0; and 0.0 is a REAL score, only
+  None means unknown) → falls back to C major and the endpoint message says so
+- **Per-instrument playback** (PlayAlong.tsx): Sound selector gained "Auto (match
+  instrument)" default; patches piano/wind/guitar/bass/uke resolved from
+  lib/instruments.ts patchForInstrument via a patchRef effect. Old explicit voices kept
+- Built under a 3-lens adversarial review workflow: it caught the grand-staff unequal
+  padding, readable-mode long-note truncation, a Start double-click race, the
+  0.0-certainty mask, same-slot keep-later inconsistency, stale YouTube copy, stale
+  setupError, and the frontend's hardcoded 2s bars — all fixed and re-verified
+
 ### v1.0 — planned next
 Not decided. Ask the owner. Long-term: v2.0 is still planned as the big black/silver
-redesign (not yet — the owner will ask for it explicitly). Other long-term items (full
-band charts, rehearsal packs, real chord detection from recordings, stem separation)
-remain unapproved; see out-of-scope below.
+premium redesign (not yet — the owner will ask for it explicitly). The app is still
+melody-first; auto chords are rough suggestions only; full band / stem separation
+remains future work. Other long-term items (full band charts, rehearsal packs) remain
+unapproved; see out-of-scope below.
 
 ### v0.6.2 — verovio made optional for Mac setup (done)
 - verovio sometimes has no wheel for a Mac's Python/OS combo and fails to compile
@@ -451,7 +497,8 @@ backend/  FastAPI (Python 3.9+; owner's Codespace uses 3.12)
   app/youtube.py        yt-dlp/ffmpeg YouTube audio import (validation + guards)
   app/musicxml.py       music21 export + INSTRUMENTS table (style=clean|raw)
   app/tablature.py      text tab for guitar/bass/ukulele (tunings, octave fit, layout)
-  app/chords.py         chord-name validation, chord chart text, rough suggestions
+  app/chords.py         chord-name validation, chart text, rough suggestions, keys
+  (settings: Project.instrument/mode/time_signature/key_signature/rhythm_detail)
   app/notation_cleanup.py  wobble/merge/fragment/quantize pipeline for clean style
   app/pdf.py            verovio/cairosvg/pypdf PDF engraving (singleton toolkit + lock)
   app/storage.py        storage/projects/<id>/{project.json,audio/,output/}
