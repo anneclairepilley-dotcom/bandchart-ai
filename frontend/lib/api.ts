@@ -35,6 +35,7 @@ export interface Project {
   time_signature?: string | null;
   key_signature?: string | null;
   rhythm_detail?: "readable" | "precise" | null;
+  note_detection?: "melody" | "poly" | null;
 }
 
 /** Pre-transcription choices saved via POST /projects/{id}/settings. */
@@ -44,6 +45,7 @@ export interface ProjectSettingsPayload {
   time_signature: string;
   key_signature: string;
   rhythm_detail: "readable" | "precise";
+  note_detection: "melody" | "poly";
 }
 
 export interface Note {
@@ -69,6 +71,10 @@ export interface NotesResponse {
   notes: Note[];
   /** Chord markers (v0.9); absent on projects transcribed before then. */
   chords?: ChordMarker[];
+  /** Which detector produced the notes (v0.9.2): "melody" or "poly". */
+  detection?: string | null;
+  /** Honest caveat about the detection (fallbacks, simplifications). */
+  detection_note?: string | null;
 }
 
 /**

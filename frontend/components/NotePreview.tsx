@@ -11,6 +11,8 @@ interface NotePreviewProps {
   currentNoteIndex?: number | null;
   /** Keep the playhead in view by scrolling the container horizontally. */
   autoScroll?: boolean;
+  /** Called with a time in seconds when the timeline is clicked (v0.9.2). */
+  onSeek?: (positionSeconds: number) => void;
 }
 
 const PX_PER_SECOND = 60;
@@ -28,8 +30,18 @@ export default function NotePreview({
   playheadTime = null,
   currentNoteIndex = null,
   autoScroll = false,
+  onSeek,
 }: NotePreviewProps) {
   const scrollBoxRef = useRef<HTMLDivElement>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
+
+  // Click on the timeline -> seek to that time (x axis is linear seconds).
+  function handleTimelineClick(event: React.MouseEvent<SVGSVGElement>) {
+    if (!onSeek || !svgRef.current) return;
+    const rect = svgRef.current.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    onSeek(Math.max(0, (x - PADDING_X) / PX_PER_SECOND));
+  }
 
   // Keep the playhead roughly centered while playing.
   useEffect(() => {
@@ -44,7 +56,7 @@ export default function NotePreview({
 
   if (notes.length === 0) {
     return (
-      <div className="rounded border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500">
+      <div className="rounded border border-dashed border-gray-300 p-6 text-center text-sm text-gray-600">
         No notes were detected.
       </div>
     );
@@ -77,15 +89,18 @@ export default function NotePreview({
   return (
     <div
       ref={scrollBoxRef}
-      className="w-full overflow-x-auto rounded border border-gray-200 bg-white"
+      className="w-full overflow-x-auto rounded border border-gray-300 bg-white"
     >
       <svg
+        ref={svgRef}
         width={width}
         height={height}
         viewBox={`0 0 ${width} ${height}`}
         role="img"
         aria-label="Piano roll preview of transcribed notes"
-        className="block"
+        className={`block ${onSeek ? "cursor-pointer" : ""}`}
+        onClick={handleTimelineClick}
+        data-testid="timeline-svg"
       >
         {/* Octave gridlines + pitch labels */}
         {octaveLines.map(({ pitch, label }) => (
@@ -102,7 +117,7 @@ export default function NotePreview({
               x={4}
               y={pitchToY(pitch) + 3}
               fontSize={9}
-              fill="#6b7280"
+              fill="#374151"
             >
               {label}
             </text>
@@ -124,7 +139,7 @@ export default function NotePreview({
               x={PADDING_X + t * PX_PER_SECOND}
               y={height - 4}
               fontSize={9}
-              fill="#6b7280"
+              fill="#374151"
               textAnchor="middle"
             >
               {t}s

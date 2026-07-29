@@ -54,7 +54,7 @@ export function ChordStrip({
   return (
     <div
       data-testid="chord-strip"
-      className="mb-2 overflow-x-auto rounded border border-gray-200 bg-gray-50 px-3 py-2 font-mono text-sm text-gray-900"
+      className="mb-2 overflow-x-auto rounded border border-gray-300 bg-gray-50 px-3 py-2 font-mono text-sm text-gray-900"
     >
       {"| " + cells.join(" | ") + " |"}
     </div>
@@ -110,12 +110,12 @@ export default function ChordsPanel({
   const outOfRange = chords.filter((c) => c.start_time > melodyEnd + 1e-6);
 
   return (
-    <section className="rounded border border-gray-200 p-4">
+    <section className="rounded border border-gray-300 p-4">
       <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-lg font-medium">Chords</h2>
         <div className="flex items-center gap-3">
           {saveState === "saving" && (
-            <span className="text-xs text-gray-500">Saving chords…</span>
+            <span className="text-xs text-gray-600">Saving chords…</span>
           )}
           {saveState === "saved" && (
             <span className="text-xs text-green-700" data-testid="chords-saved">
@@ -124,7 +124,7 @@ export default function ChordsPanel({
           )}
         </div>
       </div>
-      <p className="mb-3 text-xs text-gray-500">
+      <p className="mb-3 text-xs text-gray-600">
         Add chord names above your melody — like C, Am, F#m7, Bb or G/B. One
         bar is {secondsPerBar} seconds (the app&apos;s fixed 120 bpm,{" "}
         {timeSignature}). Chords appear on the sheet music, in the chord
@@ -163,7 +163,7 @@ export default function ChordsPanel({
       )}
 
       {chords.length === 0 ? (
-        <p className="mb-3 text-sm text-gray-500" data-testid="chords-empty">
+        <p className="mb-3 text-sm text-gray-600" data-testid="chords-empty">
           No chords yet. Click <span className="font-medium">+ Add chord</span>,
           or try <span className="font-medium">Suggest chords from melody</span>.
         </p>
@@ -185,7 +185,7 @@ export default function ChordsPanel({
                   }}
                   data-testid={`chord-name-${i}`}
                   aria-label={`Name of chord ${i + 1}`}
-                  className="w-20 rounded border border-gray-300 px-2 py-1"
+                  className="w-20 rounded border border-gray-400 px-2 py-1"
                 />
               </label>
               <label className="flex items-center gap-1">
@@ -201,11 +201,11 @@ export default function ChordsPanel({
                   }}
                   data-testid={`chord-start-${i}`}
                   aria-label={`Start time of chord ${i + 1}`}
-                  className="w-24 rounded border border-gray-300 px-2 py-1"
+                  className="w-24 rounded border border-gray-400 px-2 py-1"
                 />
                 <span className="text-gray-600">seconds</span>
               </label>
-              <span className="text-xs text-gray-500">
+              <span className="text-xs text-gray-600">
                 (bar {chordBarNumber(chord.start_time, secondsPerBar)})
               </span>
               <button
@@ -227,7 +227,7 @@ export default function ChordsPanel({
           type="button"
           onClick={onAddChord}
           data-testid="add-chord"
-          className="rounded border border-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-gray-50"
+          className="rounded border border-gray-400 px-3 py-1.5 text-sm font-medium hover:bg-gray-50"
         >
           + Add chord
         </button>
@@ -236,7 +236,7 @@ export default function ChordsPanel({
           onClick={onSuggestChords}
           disabled={suggestBusy}
           data-testid="suggest-chords"
-          className="flex items-center gap-2 rounded border border-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex items-center gap-2 rounded border border-gray-400 px-3 py-1.5 text-sm font-medium hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {suggestBusy && (
             <span
@@ -251,7 +251,7 @@ export default function ChordsPanel({
             href={chordChartDownloadUrl(projectId)}
             download
             data-testid="download-chords"
-            className="rounded border border-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-gray-50"
+            className="rounded border border-gray-400 px-3 py-1.5 text-sm font-medium hover:bg-gray-50"
           >
             Download Chord Chart
           </a>
@@ -260,7 +260,7 @@ export default function ChordsPanel({
             type="button"
             disabled
             title="Add at least one chord first"
-            className="cursor-not-allowed rounded border border-gray-300 px-3 py-1.5 text-sm font-medium opacity-50"
+            className="cursor-not-allowed rounded border border-gray-400 px-3 py-1.5 text-sm font-medium opacity-50"
           >
             Download Chord Chart
           </button>
@@ -270,13 +270,13 @@ export default function ChordsPanel({
             type="button"
             onClick={onResetChords}
             data-testid="reset-chords"
-            className="rounded border border-gray-300 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50"
+            className="rounded border border-gray-400 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50"
           >
             Reset chords (remove all)
           </button>
         )}
       </div>
-      <p className="mt-2 text-xs text-gray-500">
+      <p className="mt-2 text-xs text-gray-600">
         Chord suggestions are a rough starting point. Please check and edit
         them. This is not automatic chord detection from the recording — the
         app still hears one melody line at a time.

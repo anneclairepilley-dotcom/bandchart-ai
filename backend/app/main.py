@@ -60,6 +60,7 @@ AUDIO_CONTENT_TYPES = {
 VALID_MODES = {"direct_transcription", "solo_arrangement"}
 VALID_TIME_SIGNATURES = {"predict", "4/4", "3/4", "6/8"}
 VALID_RHYTHM_DETAILS = {"readable", "precise"}
+VALID_NOTE_DETECTIONS = {"melody", "poly"}
 # Quarter notes per bar at the fixed 120 BPM (0.5s per quarter).
 _BAR_SECONDS = {"4/4": 2.0, "3/4": 1.5, "6/8": 1.5}
 
@@ -114,11 +115,18 @@ def set_project_settings(project_id: str, body: ProjectSettings) -> Project:
             detail=f"'{body.rhythm_detail}' isn't a rhythm detail option. "
             "Choose Readable or Precise.",
         )
+    if body.note_detection not in VALID_NOTE_DETECTIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{body.note_detection}' isn't a note detection option. "
+            "Choose Melody only, or Allow simple chords / multiple notes.",
+        )
     project.instrument = body.instrument
     project.mode = body.mode
     project.time_signature = body.time_signature
     project.key_signature = body.key_signature
     project.rhythm_detail = body.rhythm_detail
+    project.note_detection = body.note_detection
     project.updated_at = storage.now_iso()
     storage.save_project(project)
     return project
@@ -341,6 +349,7 @@ def transcribe(project_id: str) -> Project:
             project_id=project.id,
             project_name=project.name,
             source_audio_filename=project.audio_filename,
+            detection=project.note_detection or "melody",
         )
     except Exception as exc:  # noqa: BLE001
         message = _friendly_transcription_error(exc)
@@ -391,14 +400,19 @@ def _save_working_notes(project: Project, notes: list[dict]) -> dict:
     touches the chords.
     """
     existing_chords: list[dict] = []
+    existing_detection = "melody"
+    existing_detection_note = None
     json_path = storage.transcription_json_path(project.id)
     if json_path.exists():
         try:
-            existing_chords = json.loads(json_path.read_text()).get("chords", [])
+            existing = json.loads(json_path.read_text())
+            existing_chords = existing.get("chords", [])
+            existing_detection = existing.get("detection", "melody")
+            existing_detection_note = existing.get("detection_note")
         except Exception:
             existing_chords = []
 
-    notes = sorted(notes, key=lambda n: n["start_time"])
+    notes = sorted(notes, key=lambda n: (n["start_time"], n["pitch"]))
     data = {
         "project_id": project.id,
         "project_name": project.name,
@@ -407,6 +421,8 @@ def _save_working_notes(project: Project, notes: list[dict]) -> dict:
         "note_count": len(notes),
         "notes": notes,
         "chords": existing_chords,
+        "detection": existing_detection,
+        "detection_note": existing_detection_note,
     }
     storage.transcription_json_path(project.id).write_text(json.dumps(data, indent=2))
     write_midi_from_notes(notes, storage.midi_path(project.id))
@@ -662,6 +678,7 @@ def _generate_musicxml_or_error(project_id: str, instrument: str, style: str) ->
             arrangement_label=(
                 "solo arrangement" if project.mode == "solo_arrangement" else None
             ),
+            detection=data.get("detection", "melody"),
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(

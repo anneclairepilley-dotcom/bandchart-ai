@@ -2,7 +2,7 @@
 
 AI music arranging and rehearsal app that turns songs into editable lead sheets, solo sheets, band charts and custom arrangements.
 
-## v0.9.1 — A real sheet-music workflow: upload → pick instrument → readable notation
+## v0.9.2 — Readability, click-to-seek, and experimental multiple notes
 
 This is the smallest possible working prototype: a local web app where you upload an audio
 file and the backend runs **real audio-to-pitch transcription** using
@@ -74,7 +74,21 @@ environments with newer Python versions.
   play-along surface: a thin **blue playhead** glides continuously through the notes as
   they play (v0.8), a light blue wash marks the current bar, the playhead sits visibly at
   the start before you play, freezes on Pause, returns to the start on Stop, and the
-  sheet auto-scrolls to keep the current bar in view
+  sheet auto-scrolls to keep the current bar in view. Bar numbers sit cleanly at the
+  start of each system (v0.9.2)
+- **Click to seek** (v0.9.2): click anywhere on the sheet and the blue playhead jumps to
+  the nearest note — playback continues from there if playing, stays put if paused, and
+  a click while stopped sets where the next Play begins. The note timeline (piano roll),
+  the tab columns and the note-table rows are clickable too
+- **Experimental multiple-note detection** (v0.9.2): a new "Note detection" advanced
+  setting — Melody only (default) or **Allow simple chords / multiple notes**
+  (experimental; picked automatically for Piano + Direct transcription). It slices the
+  recording at onsets and reads up to 4 clear simultaneous pitches, so simple piano
+  chords appear as stacked chords on the grand staff, play together in Play Along, and
+  land together in MIDI/JSON/MusicXML/PDF. It is honest about its limits: it works best
+  with clear piano or simple chords, falls back to melody-only with a clear message
+  when it finds nothing usable, and the tab stays melody-first (top note of each chord,
+  with a note saying so). This is NOT full band or complex-piano transcription
 - **Auto-scroll** (on by default, toggleable): the sheet music, piano roll and note table
   keep the current note in view while playing
 - **Fix wrong notes** (v0.8): the note table is editable — type a new pitch (a note name
@@ -99,9 +113,10 @@ environments with newer Python versions.
 
 **Explicitly out of scope so far:** accounts, payments, full band charts, rehearsal packs,
 complex editing, stem separation, drums, automatic chord detection from recordings (v0.9's
-chords are manual markers plus rough melody-based suggestions), strummed guitar chord
-shapes/diagrams, full guitar/bass extraction from mixed songs (tab comes from the single
-detected melody line).
+chords are manual markers plus rough melody-based suggestions), accurate transcription of
+complex piano pieces or full-band mixes (v0.9.2's multiple-note detection is experimental
+and for clear, simple material), strummed guitar chord shapes/diagrams, full guitar/bass
+extraction from mixed songs (tab stays melody-first).
 
 ---
 

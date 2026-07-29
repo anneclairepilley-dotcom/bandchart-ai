@@ -114,12 +114,46 @@ def run_transcription(
     project_id: str,
     project_name: str,
     source_audio_filename: str,
+    detection: str = "melody",
 ) -> dict[str, Any]:
-    """Run real pYIN-based pitch transcription on audio_path, write MIDI + notes JSON.
+    """Run pitch transcription on audio_path, write MIDI + notes JSON.
+
+    detection="melody" (default) is the trusty pYIN single-line tracker.
+    detection="poly" tries the experimental multi-pitch detector
+    (app/polyphonic.py); on failure or an empty result it falls back to
+    melody-only and records why in "detection_note".
 
     Returns the transcription result dict (same shape written to json_out_path).
     """
-    notes = _detect_notes(audio_path)
+    detection_used = "melody"
+    detection_note: str | None = None
+    notes: list[dict[str, Any]] | None = None
+
+    if detection == "poly":
+        try:
+            from app.polyphonic import detect_notes_poly
+
+            notes, poly_messages = detect_notes_poly(audio_path)
+            if notes:
+                detection_used = "poly"
+                if poly_messages:
+                    detection_note = " ".join(poly_messages)
+            else:
+                notes = None
+                detection_note = (
+                    "Multiple-note detection found nothing usable in this "
+                    "recording, so melody-only transcription was used instead."
+                )
+        except Exception as exc:  # noqa: BLE001
+            notes = None
+            detection_note = (
+                f"Multiple-note detection failed ({exc}) — melody-only "
+                "transcription was used instead."
+            )
+
+    if notes is None:
+        notes = _detect_notes(audio_path)
+
     write_midi_from_notes(notes, midi_out_path)
 
     result = {
@@ -131,6 +165,10 @@ def run_transcription(
         "notes": notes,
         # Manual chord markers (v0.9) — a fresh transcription starts empty.
         "chords": [],
+        # v0.9.2: which detector produced these notes, plus any honest
+        # caveat (fallbacks, simplifications) to show the user.
+        "detection": detection_used,
+        "detection_note": detection_note,
     }
 
     json_out_path.parent.mkdir(parents=True, exist_ok=True)

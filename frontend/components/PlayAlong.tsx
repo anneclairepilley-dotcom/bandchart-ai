@@ -14,6 +14,12 @@ interface PlayAlongProps {
    * Both are null when playback is stopped.
    */
   onTick: (position: number | null, noteIndex: number | null) => void;
+  /**
+   * Hands the parent a seek(seconds) function (v0.9.2 click-to-seek):
+   * playing → jump and keep playing; paused → move the frozen position;
+   * stopped → set where the next Play will start (playhead moves too).
+   */
+  registerSeek?: (seek: (positionSeconds: number) => void) => void;
   autoScroll: boolean;
   onAutoScrollChange: (value: boolean) => void;
 }
@@ -57,6 +63,7 @@ export default function PlayAlong({
   notes,
   instrumentKey,
   onTick,
+  registerSeek,
   autoScroll,
   onAutoScrollChange,
 }: PlayAlongProps) {
@@ -82,6 +89,12 @@ export default function PlayAlong({
   const activeNodesRef = useRef<ActiveNode[]>([]);
   const rafRef = useRef<number | null>(null);
   const pausedPosRef = useRef(0);
+  // Where a fresh (stopped -> play) start begins; set by click-to-seek.
+  const startPosRef = useRef(0);
+  const statusRef = useRef<Status>("stopped");
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
 
   const duration =
     notes.length > 0
@@ -268,6 +281,7 @@ export default function PlayAlong({
     stopLoop();
     silenceAll();
     pausedPosRef.current = 0;
+    startPosRef.current = 0;
     setStatus("stopped");
     setPositionDisplay(0);
     onTick(null, null);
@@ -380,7 +394,9 @@ export default function PlayAlong({
     void ctxRef.current.resume();
 
     const resuming = status === "paused";
-    const startPos = resuming ? pausedPosRef.current : 0;
+    // Fresh starts begin wherever click-to-seek last placed the playhead
+    // (0 unless the user clicked while stopped).
+    const startPos = resuming ? pausedPosRef.current : startPosRef.current;
     startTransport(startPos, rate, !resuming && countIn);
     setStatus("playing");
   }, [status, rate, countIn, duration, startTransport, stopLoop, silenceAll, onTick, noteIndexAt]);
@@ -408,6 +424,29 @@ export default function PlayAlong({
     setVoice(v);
   }, []);
 
+  /** Click-to-seek (v0.9.2): jump the transport/playhead to a position. */
+  const handleSeek = useCallback(
+    (positionSeconds: number) => {
+      const pos = Math.max(0, Math.min(positionSeconds, duration));
+      const current = statusRef.current;
+      if (current === "playing") {
+        silenceAll();
+        startTransport(pos, rateRef.current, false);
+      } else if (current === "paused") {
+        pausedPosRef.current = pos;
+      } else {
+        startPosRef.current = pos;
+      }
+      setPositionDisplay(pos);
+      onTick(pos, noteIndexAt(pos));
+    },
+    [duration, silenceAll, startTransport, onTick, noteIndexAt]
+  );
+
+  useEffect(() => {
+    registerSeek?.(handleSeek);
+  }, [registerSeek, handleSeek]);
+
   // Full cleanup when the component unmounts or the notes change (a note
   // edit mid-playback stops the transport cleanly).
   useEffect(() => {
@@ -427,9 +466,9 @@ export default function PlayAlong({
   }
 
   return (
-    <section className="rounded border border-gray-200 p-4">
+    <section className="rounded border border-gray-300 p-4">
       <h2 className="mb-1 text-lg font-medium">Play Along</h2>
-      <p className="mb-3 text-xs text-gray-500">
+      <p className="mb-3 text-xs text-gray-600">
         Playback uses the generated transcription, not the original audio.
       </p>
 
@@ -447,7 +486,7 @@ export default function PlayAlong({
           onClick={handleStop}
           disabled={status === "stopped"}
           data-testid="playalong-stop"
-          className="rounded border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded border border-gray-400 px-4 py-2 text-sm font-medium hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Stop
         </button>
@@ -471,7 +510,7 @@ export default function PlayAlong({
               className={`rounded px-2 py-1 text-sm ${
                 rate === s
                   ? "bg-blue-600 font-medium text-white"
-                  : "border border-gray-300 hover:bg-gray-50"
+                  : "border border-gray-400 hover:bg-gray-50"
               }`}
             >
               {s * 100}%
@@ -484,7 +523,7 @@ export default function PlayAlong({
             value={voice}
             onChange={(e) => handleVoiceChange(e.target.value as Voice)}
             data-testid="playalong-voice"
-            className="rounded border border-gray-300 px-2 py-1 text-sm"
+            className="rounded border border-gray-400 px-2 py-1 text-sm"
           >
             {VOICES.map((v) => (
               <option key={v.key} value={v.key}>

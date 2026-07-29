@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from music21 import (
+    chord as m21_chord,
     clef,
     harmony,
     instrument,
@@ -104,6 +105,7 @@ def notes_to_musicxml(
     time_signature: str = "4/4",
     key_signature: str | None = None,
     arrangement_label: str | None = None,
+    detection: str = "melody",
 ) -> Path:
     """Write a MusicXML file for the given detected notes and instrument.
 
@@ -122,12 +124,17 @@ def notes_to_musicxml(
     around middle C, with rests filling whichever staff has no melody.
     """
     spec = INSTRUMENTS[instrument_key]
+    polyphonic = detection == "poly"
 
     cleaned = style == "clean"
     if cleaned:
-        notes = clean_notes(notes)
-        if rhythm_detail != "precise":
-            notes = make_readable(notes)
+        # The wobble/merge/readable passes assume ONE melody line — running
+        # them on polyphonic notes would merge or drop chord members, so
+        # polyphonic transcriptions only get grid quantization (below).
+        if not polyphonic:
+            notes = clean_notes(notes)
+            if rhythm_detail != "precise":
+                notes = make_readable(notes)
         grid_ql = 0.5  # eighth-note grid, matching the cleanup quantization
     else:
         grid_ql = QUANT
@@ -154,29 +161,70 @@ def notes_to_musicxml(
         staff.insert(0, meter.TimeSignature(ts_string))
     main_staff.insert(0, tempo.MetronomeMark(number=TEMPO_BPM))
 
-    # Notes are stored sorted by start time and (being monophonic) should not
-    # overlap; clip any stragglers so the exporter never sees overlapping notes.
+    # placed: every (offset, duration, pitch) that ends up on paper — used
+    # below for staff padding and key analysis regardless of the path taken.
     placed: list[tuple[float, float, int]] = []
-    for n in notes:
-        offset_ql = _quantize(n["start_time"] / SECONDS_PER_QUARTER, grid_ql)
-        dur_ql = max(grid_ql, _quantize(n["duration"] / SECONDS_PER_QUARTER, grid_ql))
-        if placed:
-            prev_offset, prev_dur, prev_pitch = placed[-1]
-            if offset_ql < prev_offset + prev_dur:
-                clipped = offset_ql - prev_offset
-                if clipped < grid_ql:
-                    # Same grid slot as the previous note; keep the earlier one.
-                    continue
-                placed[-1] = (prev_offset, clipped, prev_pitch)
-        placed.append((offset_ql, dur_ql, int(n["pitch"])))
 
-    for offset_ql, dur_ql, midi_pitch in placed:
-        m21_note = note.Note(midi_pitch)
-        m21_note.quarterLength = dur_ql
-        if grand and midi_pitch < GRAND_STAFF_SPLIT_MIDI:
-            staves[1].insert(offset_ql, m21_note)
-        else:
-            staves[0].insert(offset_ql, m21_note)
+    if polyphonic:
+        # Polyphonic path (v0.9.2): notes sharing a grid slot become one
+        # engraved chord (per staff on the piano grand staff). Durations
+        # are clipped so an event never runs past the next one.
+        groups: dict[float, dict[int, float]] = {}
+        for n in notes:
+            offset_ql = _quantize(n["start_time"] / SECONDS_PER_QUARTER, grid_ql)
+            dur_ql = max(grid_ql, _quantize(n["duration"] / SECONDS_PER_QUARTER, grid_ql))
+            slot = groups.setdefault(offset_ql, {})
+            pitch_value = int(n["pitch"])
+            slot[pitch_value] = max(slot.get(pitch_value, 0.0), dur_ql)
+
+        offsets = sorted(groups)
+        for index, offset_ql in enumerate(offsets):
+            room = (
+                offsets[index + 1] - offset_ql if index + 1 < len(offsets) else None
+            )
+            members = groups[offset_ql]
+            per_staff: dict[int, list[int]] = {}
+            for pitch_value in sorted(members):
+                staff_index = (
+                    1 if grand and pitch_value < GRAND_STAFF_SPLIT_MIDI else 0
+                )
+                per_staff.setdefault(staff_index, []).append(pitch_value)
+            for staff_index, pitches in per_staff.items():
+                dur_ql = max(members[p] for p in pitches)
+                if room is not None:
+                    dur_ql = min(dur_ql, room)
+                dur_ql = max(grid_ql, dur_ql)
+                if len(pitches) == 1:
+                    element: note.NotRest = note.Note(pitches[0])
+                else:
+                    element = m21_chord.Chord(pitches)
+                element.quarterLength = dur_ql
+                staves[staff_index].insert(offset_ql, element)
+                for pitch_value in pitches:
+                    placed.append((offset_ql, dur_ql, pitch_value))
+    else:
+        # Melody path (unchanged): notes are monophonic and must not
+        # overlap; clip any stragglers so the exporter never sees overlaps.
+        for n in notes:
+            offset_ql = _quantize(n["start_time"] / SECONDS_PER_QUARTER, grid_ql)
+            dur_ql = max(grid_ql, _quantize(n["duration"] / SECONDS_PER_QUARTER, grid_ql))
+            if placed:
+                prev_offset, prev_dur, prev_pitch = placed[-1]
+                if offset_ql < prev_offset + prev_dur:
+                    clipped = offset_ql - prev_offset
+                    if clipped < grid_ql:
+                        # Same grid slot as the previous note; keep the earlier one.
+                        continue
+                    placed[-1] = (prev_offset, clipped, prev_pitch)
+            placed.append((offset_ql, dur_ql, int(n["pitch"])))
+
+        for offset_ql, dur_ql, midi_pitch in placed:
+            m21_note = note.Note(midi_pitch)
+            m21_note.quarterLength = dur_ql
+            if grand and midi_pitch < GRAND_STAFF_SPLIT_MIDI:
+                staves[1].insert(offset_ql, m21_note)
+            else:
+                staves[0].insert(offset_ql, m21_note)
 
     # BOTH grand-staff sides must span the same whole number of bars, or
     # makeNotation gives them different measure counts — which misplaces
@@ -189,7 +237,7 @@ def notes_to_musicxml(
         for staff in staves:
             staff_end = max(
                 (n.offset + n.quarterLength
-                 for n in staff.recurse().getElementsByClass(note.Note)),
+                 for n in staff.recurse().getElementsByClass(note.NotRest)),
                 default=0.0,
             )
             if staff_end < total_ql - 1e-9:

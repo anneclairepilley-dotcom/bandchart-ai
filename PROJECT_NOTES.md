@@ -1,6 +1,6 @@
 # BandChart AI — Project Notes
 
-Living notes for contributors (human or AI). Last updated after v0.9.1 (2026-07).
+Living notes for contributors (human or AI). Last updated after v0.9.2 (2026-07).
 If you are a new Claude Code session: read this file, then README.md, before changing code.
 
 ## Purpose
@@ -221,11 +221,48 @@ Explanations, error messages, and README instructions must stay beginner-friendl
   0.0-certainty mask, same-slot keep-later inconsistency, stale YouTube copy, stale
   setupError, and the frontend's hardcoded 2s bars — all fixed and re-verified
 
+### v0.9.2 — readability, click-to-seek, experimental polyphony (done)
+- **Contrast sweep**: dim grays lifted one step app-wide (text-gray-400/500 → 600,
+  button/input borders 300 → 400, card borders 200 → 300, darker StatusBadge text,
+  darker piano-roll SVG labels). Still the light theme — v2.0 stays the big redesign
+- **Click-to-seek**: PlayAlong exposes seek() via a registerSeek callback prop (page
+  keeps it in a ref). Rules: playing → silenceAll + restart transport at the position
+  (no count-in); paused → move the frozen position; stopped → set startPosRef, which a
+  fresh Play (still with count-in) starts from; Stop resets it to 0. Click surfaces:
+  the sheet (nearest entry — entry tops vary a few px WITHIN a system, so cluster with
+  a ±100px band, never exact-match tops), the piano-roll timeline (linear x = 40px +
+  60px/s), tab columns (note index → start time) and note-table rows (guard: ignore
+  clicks on inputs/buttons). onTick fires immediately on seek so playhead/wash follow
+  even while stopped
+- **Experimental multiple-note detection** (backend/app/polyphonic.py): CQT (C2..B6,
+  1 bin/semitone) + onset segmentation; per segment up to 4 locally-peaked bins above
+  relative (25% of top) + absolute floors, harmonics suppressed (+12/+19/+24/+28 above
+  an accepted note unless ≥80% of its energy); per-bin sustain trims durations.
+  Wired as note_detection = "melody"|"poly" on Project/settings; run_transcription
+  falls back to pYIN with a clear detection_note on failure/empty; transcription.json
+  gains "detection" + "detection_note" (preserved by _save_working_notes like chords).
+  Verified: sine triads C/F/G detected exactly, silence falls back with message
+- Poly downstream: musicxml groups same-grid-slot notes into m21 chord.Chord objects
+  (per staff on the piano grand staff; mono cleanup/readable passes are SKIPPED for
+  poly — they'd merge or drop chord members); grand-staff padding counts NotRest (not
+  just Note) so chords count toward staff length; MIDI/JSON overlap naturally;
+  Play Along schedules overlapping notes together already; note editor shows/edits
+  same-start rows; TAB stays melody-first (top note of each same-start group, original
+  indexes kept for highlight, warning shown). Frontend defaults poly ONLY for
+  piano + direct transcription (until the user touches the Note detection control)
+- **Bar numbers**: OSMD options drawMeasureNumbers + drawMeasureNumbersOnlyAtSystemStart
+  → numbers sit at system starts above the top staff, no mid-score floaters
+- **Testing gotcha**: Playwright mouse.click uses viewport coordinates and does NOT
+  auto-scroll — scrollIntoViewIfNeeded() the sheet first or every click silently
+  misses and reads as "seek doesn't work" (it did; the clicks never landed)
+
 ### v1.0 — planned next
 Not decided. Ask the owner. Long-term: v2.0 is still planned as the big black/silver
 premium redesign (not yet — the owner will ask for it explicitly). The app is still
-melody-first; auto chords are rough suggestions only; full band / stem separation
-remains future work. Other long-term items (full band charts, rehearsal packs) remain
+melody-first and strongest on clear single melody lines; multiple-note detection is
+experimental (clear piano / simple chords only); auto chords are rough suggestions
+only; accurate complex-piano / full-band transcription and stem separation remain
+future work. Other long-term items (full band charts, rehearsal packs) remain
 unapproved; see out-of-scope below.
 
 ### v0.6.2 — verovio made optional for Mac setup (done)
@@ -497,6 +534,7 @@ backend/  FastAPI (Python 3.9+; owner's Codespace uses 3.12)
   app/youtube.py        yt-dlp/ffmpeg YouTube audio import (validation + guards)
   app/musicxml.py       music21 export + INSTRUMENTS table (style=clean|raw)
   app/tablature.py      text tab for guitar/bass/ukulele (tunings, octave fit, layout)
+  app/polyphonic.py     experimental CQT+onset multi-pitch detector (max 4 at once)
   app/chords.py         chord-name validation, chart text, rough suggestions, keys
   (settings: Project.instrument/mode/time_signature/key_signature/rhythm_detail)
   app/notation_cleanup.py  wobble/merge/fragment/quantize pipeline for clean style
