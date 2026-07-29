@@ -129,6 +129,8 @@ def run_transcription(
         "generated_at": now_iso(),
         "note_count": len(notes),
         "notes": notes,
+        # Manual chord markers (v0.9) — a fresh transcription starts empty.
+        "chords": [],
     }
 
     json_out_path.parent.mkdir(parents=True, exist_ok=True)
