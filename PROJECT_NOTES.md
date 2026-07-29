@@ -126,7 +126,8 @@ none approved; see out-of-scope below.)
   data-loss bug, the live-stream duration bypass, the playlist expansion, the
   delete-during-import resurrection, and a stale saveError in the frontend — all fixed
   and re-verified. YouTube itself is unreachable from the dev sandbox, so the live-fetch
-  step was verified via the generic extractor; owner validates real YouTube in Codespaces
+  step was verified via the generic extractor; the owner has since confirmed real
+  YouTube import working on a local Mac (Codespaces may still be bot-blocked)
 
 ### v0.5.7 — safe project deletion (done)
 - `DELETE /api/projects/{id}` removes the project's whole storage folder
@@ -237,6 +238,11 @@ Next.js proxy, plus confirmed by the owner in Codespaces:
   against real yt-dlp error strings; failed import verified to leave an existing
   transcription fully intact (notes/midi/audio/reset all 200 after a 502 import);
   upload + note-edit + delete regressions re-run green in-browser
+- **OWNER-CONFIRMED (2026-07): YouTube import works for real on a local Mac** — the
+  import feeds the existing transcription pipeline exactly as designed, and normal audio
+  upload still works alongside it. PDF export needed one extra step locally
+  (`brew install cairo`), after which the whole app works. Codespaces may still get
+  bot-blocked by YouTube (expected; local Mac is the reliable path for YouTube import)
 - v0.5.7 delete: confirmation shows the exact agreed wording; cancel keeps the project;
   confirm removes it from the list immediately and survives a page refresh; the storage
   folder is gone from disk; other projects (sheet, downloads) unaffected; deleting an
@@ -292,6 +298,12 @@ the Next server proxies `/api/*` to the backend (see `frontend/next.config.ts`).
 
 ### Mac (double-click scripts at repo root)
 `check.command` → `setup.command` → `start.command`. See README for details.
+
+Local Mac requirements (owner's working configuration): Homebrew; Python 3.12
+(`brew install python@3.12` — the scripts prefer it and rebuild the venv from older
+Pythons automatically); Node/npm; ffmpeg (`brew install ffmpeg` — required for YouTube
+import and mp3/m4a); yt-dlp (installed automatically by setup.command into
+backend/.venv); and Cairo (`brew install cairo`) for PDF export.
 
 ## Architecture / key files
 ```

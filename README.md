@@ -333,9 +333,10 @@ Command Line Tools (`xcode-select --install` in Terminal — a few minutes), the
 `setup.command` again.
 
 **PDF download fails with a message about "cairo".** The PDF engine uses a system library
-called cairo that is preinstalled in GitHub Codespaces and on most computers. If it's
-missing, run `sudo apt-get update && sudo apt-get install -y libcairo2` in the terminal,
-restart the backend, and try again. The MusicXML download works regardless.
+called cairo. In Codespaces it's usually preinstalled — if missing, run
+`sudo apt-get update && sudo apt-get install -y libcairo2`. On a Mac run
+`brew install cairo`. Then restart the backend and try again. The MusicXML download
+works regardless.
 
 **"Could not reach the backend" error in the app.** Two usual causes: (1) the backend isn't
 running — check the terminal where you started `uvicorn`; it should say
