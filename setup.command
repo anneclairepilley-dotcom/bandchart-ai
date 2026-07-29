@@ -26,7 +26,25 @@ echo
 
 echo "Checking prerequisites..."
 
-command -v python3 >/dev/null 2>&1 || fail "Python 3 is not installed. Double-click check.command to see how to install it."
+# Prefer Homebrew's Python 3.12 (Apple Silicon path first, then Intel
+# Homebrew, then anything on PATH), falling back to the system python3.
+PYTHON_BIN=""
+for candidate in /opt/homebrew/bin/python3.12 /usr/local/bin/python3.12 python3.12 python3; do
+  if [ -x "$candidate" ] || command -v "$candidate" >/dev/null 2>&1; then
+    PYTHON_BIN="$candidate"
+    break
+  fi
+done
+[ -n "$PYTHON_BIN" ] || fail "Python 3 is not installed. Double-click check.command to see how to install it."
+PY_VER="$("$PYTHON_BIN" -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")' 2>/dev/null)"
+PY_MINOR="$("$PYTHON_BIN" -c 'import sys; print(sys.version_info[1])' 2>/dev/null)"
+echo "Using $PYTHON_BIN (Python $PY_VER)"
+if [ -n "$PY_MINOR" ] && [ "$PY_MINOR" -lt 10 ] 2>/dev/null; then
+  echo -e "${YELLOW}Warning:${NC} Python $PY_VER is getting old — tools like yt-dlp are dropping support"
+  echo "         for versions below 3.10. For best results install a newer one with:"
+  echo "         brew install python@3.12   — then run setup.command again."
+fi
+
 command -v node >/dev/null 2>&1 || fail "Node.js is not installed. Double-click check.command to see how to install it."
 command -v npm  >/dev/null 2>&1 || fail "npm is not installed. Double-click check.command to see how to install it."
 if ! command -v ffmpeg >/dev/null 2>&1; then
@@ -39,8 +57,19 @@ echo
 
 echo "Setting up the backend (installs librosa, yt-dlp and other Python packages — a minute or two on a first run)..."
 cd backend || fail "Could not find the backend folder. Make sure this script is inside the bandchart-ai project folder."
+
+# If the app environment was built with an old Python and a newer interpreter
+# is available now, rebuild it — packages are simply reinstalled.
+if [ -x ".venv/bin/python" ]; then
+  VENV_MINOR="$(./.venv/bin/python -c 'import sys; print(sys.version_info[1])' 2>/dev/null)"
+  if [ -n "$VENV_MINOR" ] && [ "$VENV_MINOR" -lt 10 ] 2>/dev/null && [ -n "$PY_MINOR" ] && [ "$PY_MINOR" -ge 10 ] 2>/dev/null; then
+    echo -e "${YELLOW}Rebuilding the app environment:${NC} it was using old Python 3.$VENV_MINOR — recreating it with Python $PY_VER…"
+    rm -rf .venv
+  fi
+fi
+
 if [ ! -d ".venv" ]; then
-  python3 -m venv .venv || fail "Could not create a Python virtual environment."
+  "$PYTHON_BIN" -m venv .venv || fail "Could not create a Python virtual environment."
 fi
 ./.venv/bin/pip install --upgrade pip >/dev/null 2>&1
 if ! ./.venv/bin/pip install -r requirements.txt; then
