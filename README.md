@@ -2,7 +2,7 @@
 
 AI music arranging and rehearsal app that turns songs into editable lead sheets, solo sheets, band charts and custom arrangements.
 
-## v0.8 — Transcription + Solo Parts + Sheet Music + Play Along + Note Editing + YouTube Import + Tab
+## v0.9 — Transcription + Solo Parts + Lead Sheets + Play Along + Note Editing + YouTube Import + Tab
 
 This is the smallest possible working prototype: a local web app where you upload an audio
 file and the backend runs **real audio-to-pitch transcription** using
@@ -64,12 +64,22 @@ environments with newer Python versions.
   preview, playback, sheet music, tab and every download update automatically, and
   "Reset to original transcription" undoes all edits. Invalid values get a clear error
   message instead of breaking anything
+- **Chords / lead sheet basics** (v0.9): add your own chord names above the melody —
+  C, Am, F#m7, Bb, G/B and so on — with a beginner-friendly Chords section (add, edit,
+  delete, reset). Chords appear engraved above the staff (the sheet becomes a simple
+  **lead sheet**), in a bar-grid chord line, in the JSON, in the MusicXML/PDF, and in a
+  plain-text **Download Chord Chart**. A clearly-labelled **Suggest chords from melody
+  (rough)** button proposes simple diatonic chords as a starting point — this is NOT
+  automatic chord detection from the recording; the app still hears one melody line at
+  a time, and suggestions must be checked and edited
 - **Delete projects**: a Delete button beside each project on the dashboard removes the
   project with its uploaded audio and generated files, after a confirmation prompt
 
 **Explicitly out of scope so far:** accounts, payments, full band charts, rehearsal packs,
-complex editing, stem separation, drums, chord detection, full guitar/bass extraction from
-mixed songs (tab comes from the single detected melody line).
+complex editing, stem separation, drums, automatic chord detection from recordings (v0.9's
+chords are manual markers plus rough melody-based suggestions), strummed guitar chord
+shapes/diagrams, full guitar/bass extraction from mixed songs (tab comes from the single
+detected melody line).
 
 ---
 
@@ -299,6 +309,30 @@ the **Download TAB** button appear. Switch to **Bass** — expect the yellow oct
 note on most melodies. Switch to **Ukulele**, then back to **Piano** — the sheet music
 view returns. Delete a note in the note table and watch the tab column disappear.
 
+### Chords and lead sheets (beginner steps)
+
+v0.9 adds a simple, honest chord layer. You place the chord names yourself (or start
+from rough suggestions) — the app does **not** detect chords from the recording.
+
+1. Open a transcribed project and find the **Chords** section (under Play Along)
+2. Click **+ Add chord** — a chord row appears with a name box and a start time in
+   seconds (the matching bar number is shown next to it; one bar is 2 seconds at the
+   app's fixed 120 bpm, 4/4)
+3. Type any normal chord name — C, Am, F#m7, Bb, G7, Cmaj7, G/B — and press Enter.
+   Typos like "H9" get a clear red message and change nothing
+4. The sheet music heading flips to **Lead sheet (melody + chords)**: chord names appear
+   engraved above the staff, and a bar-grid chord line (like `| C | G | Am F |`) shows
+   above the sheet — and above the TAB for guitar/bass/ukulele
+5. **Download Chord Chart** saves a plain text file with the bar grid and every chord
+   with its time and bar number. The MusicXML and PDF downloads carry the chord symbols
+   too (transposed for E♭/B♭ instruments), and the JSON download includes the markers
+6. **Suggest chords from melody (rough)** fills the list with simple in-key guesses from
+   the detected melody. They are a rough starting point — please check and edit them
+7. Chords stay put when you edit, add or delete melody notes; **Reset chords** clears
+   the list. A chord placed after the end of the melody gets a friendly warning
+8. Limitations: one chord layer, no strummed guitar shapes/diagrams yet, and no chord
+   detection from full-band recordings — that is a later version
+
 ### Fixing wrong notes (beginner steps)
 
 Since v0.8 you can **edit** notes, not just delete them.
@@ -444,7 +478,11 @@ All endpoints are under `/api`.
 | GET | `/projects/{id}/download/pdf?instrument=<key>&style=<clean\|raw>` | Download PDF sheet music (same parameters) |
 | GET | `/projects/{id}/tab?instrument=<guitar\|bass\|ukulele>` | Tab layout as JSON (entries, warnings, preview grid) for the in-app tab preview |
 | GET | `/projects/{id}/download/tab?instrument=<guitar\|bass\|ukulele>` | Download the tab as a plain `.txt` file |
-| PUT | `/projects/{id}/notes` | Save an edited note list (rewrites JSON + MIDI) |
+| GET | `/projects/{id}/chords` | Get the chord markers |
+| PUT | `/projects/{id}/chords` | Save the chord marker list — `{"chords": [{"name": "Am", "start_time": 2.0}]}` |
+| POST | `/projects/{id}/chords/suggest` | Rough diatonic chord suggestions from the melody (replaces the list) |
+| GET | `/projects/{id}/download/chords` | Download the plain-text chord chart |
+| PUT | `/projects/{id}/notes` | Save an edited note list (rewrites JSON + MIDI; chords are preserved) |
 | POST | `/projects/{id}/notes/reset` | Restore the original transcription |
 | DELETE | `/projects/{id}` | Delete a project and all its files |
 

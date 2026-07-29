@@ -14,10 +14,13 @@ import {
   midiDownloadUrl,
   musicxmlDownloadUrl,
   resetNotes,
+  suggestChords as suggestChordsApi,
   tabDownloadUrl,
   transcribeProject,
+  updateChords,
   updateNotes,
   uploadAudio,
+  type ChordMarker,
   type NotesResponse,
   type Project,
   type SheetStyle,
@@ -28,6 +31,11 @@ import NotePreview from "@/components/NotePreview";
 import PlayAlong from "@/components/PlayAlong";
 import SheetMusic from "@/components/SheetMusic";
 import TabView from "@/components/TabView";
+import ChordsPanel, {
+  ChordStrip,
+  isValidChordName,
+  MAX_CHORD_NAME_LEN,
+} from "@/components/ChordsPanel";
 import type { Note } from "@/lib/api";
 
 /** Keep the working notes ordered by start time — playback scheduling, the
@@ -386,6 +394,159 @@ export default function ProjectDetailPage() {
     });
   }, []);
 
+  // ----- Chord markers (v0.9): a working copy with its own debounced save.
+  // Chords live alongside the notes in transcription.json; note edits never
+  // touch them, and every export (JSON/MusicXML/PDF/chart) includes them.
+  const [chords, setChords] = useState<ChordMarker[] | null>(null);
+  const [chordSaveState, setChordSaveState] = useState<
+    "idle" | "saving" | "saved" | "error"
+  >("idle");
+  const [chordsError, setChordsError] = useState<string | null>(null);
+  const [suggestBusy, setSuggestBusy] = useState(false);
+  const [suggestNote, setSuggestNote] = useState<string | null>(null);
+  const pendingChordSaveRef = useRef(false);
+
+  useEffect(() => {
+    if (!pendingChordSaveRef.current || chords === null) return;
+    const timer = setTimeout(async () => {
+      try {
+        await updateChords(projectId, chords);
+        pendingChordSaveRef.current = false;
+        setChordSaveState("saved");
+        setChordsError(null);
+        // Sheet/tab re-fetch so the engraved chord symbols update too.
+        setNotesVersion((v) => v + 1);
+      } catch (err) {
+        setChordSaveState("error");
+        setChordsError(
+          err instanceof ApiError
+            ? err.message
+            : "Couldn't save the chords — check that the backend is running."
+        );
+      }
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [chords, projectId]);
+
+  const applyChords = useCallback(
+    (updater: (list: ChordMarker[]) => ChordMarker[]) => {
+      pendingChordSaveRef.current = true;
+      setChordSaveState("saving");
+      setSuggestNote(null);
+      setChords((current) =>
+        current
+          ? [...updater(current)].sort((a, b) => a.start_time - b.start_time)
+          : current
+      );
+    },
+    []
+  );
+
+  const handleEditChord = useCallback(
+    (index: number, field: "name" | "start_time", raw: string) => {
+      const current = chords?.[index];
+      if (!current) return;
+      if (field === "name") {
+        const name = raw.trim();
+        if (!isValidChordName(name)) {
+          setChordsError(
+            `"${name || "(empty)"}" isn't a valid chord name. Chord names ` +
+              "start with a letter A–G, like C, Am, F#m7, Bb or G/B " +
+              `(up to ${MAX_CHORD_NAME_LEN} characters).`
+          );
+          return;
+        }
+        if (name === current.name) {
+          setChordsError(null);
+          return;
+        }
+        setChordsError(null);
+        applyChords((list) =>
+          list.map((c, i) => (i === index ? { ...c, name } : c))
+        );
+      } else {
+        const value = Number(raw);
+        if (raw.trim() === "" || !Number.isFinite(value) || value < 0) {
+          setChordsError(
+            "Chord start time must be a number of seconds, 0 or more (e.g. 2 or 2.5)."
+          );
+          return;
+        }
+        if (Math.abs(value - current.start_time) < 1e-9) {
+          setChordsError(null);
+          return;
+        }
+        setChordsError(null);
+        applyChords((list) =>
+          list.map((c, i) => (i === index ? { ...c, start_time: value } : c))
+        );
+      }
+    },
+    [chords, applyChords]
+  );
+
+  const handleAddChord = useCallback(() => {
+    setChordsError(null);
+    applyChords((list) => [
+      ...list,
+      {
+        name: "C",
+        start_time: list.length
+          ? Number((list[list.length - 1].start_time + 2).toFixed(3))
+          : 0,
+      },
+    ]);
+  }, [applyChords]);
+
+  const handleDeleteChord = useCallback(
+    (index: number) => {
+      setChordsError(null);
+      applyChords((list) => list.filter((_, i) => i !== index));
+    },
+    [applyChords]
+  );
+
+  const handleResetChords = useCallback(() => {
+    if (
+      !window.confirm(
+        "Remove all chords? This clears the chord list (the melody is not affected)."
+      )
+    ) {
+      return;
+    }
+    setChordsError(null);
+    applyChords(() => []);
+  }, [applyChords]);
+
+  const handleSuggestChords = useCallback(async () => {
+    if (
+      chords &&
+      chords.length > 0 &&
+      !window.confirm("Replace the current chords with fresh suggestions?")
+    ) {
+      return;
+    }
+    setSuggestBusy(true);
+    setChordsError(null);
+    try {
+      const result = await suggestChordsApi(projectId);
+      pendingChordSaveRef.current = false; // the backend already saved them
+      setChords(result.chords);
+      setSuggestNote(result.message);
+      setChordSaveState("saved");
+      setNotesVersion((v) => v + 1);
+    } catch (err) {
+      setChordSaveState("error");
+      setChordsError(
+        err instanceof ApiError
+          ? err.message
+          : "Couldn't suggest chords — check that the backend is running."
+      );
+    } finally {
+      setSuggestBusy(false);
+    }
+  }, [chords, projectId]);
+
   const handleResetNotes = useCallback(async () => {
     setSaveState("saving");
     try {
@@ -396,6 +557,8 @@ export default function ProjectDetailPage() {
       setSaveState("idle");
       setSaveError(null);
       setEditError(null);
+      // Resetting notes keeps the chords (the backend preserves them).
+      setChords(data.chords ?? []);
       setNotesVersion((v) => v + 1);
     } catch (err) {
       setSaveState("error");
@@ -480,6 +643,9 @@ export default function ProjectDetailPage() {
           setWorkingNotes(data.notes);
           pendingSaveRef.current = false;
           setSaveState("idle");
+          setChords(data.chords ?? []);
+          pendingChordSaveRef.current = false;
+          setChordSaveState("idle");
         }
       })
       .catch((err: unknown) => {
@@ -547,6 +713,11 @@ export default function ProjectDetailPage() {
       setSaveState("idle");
       setNotesError(null);
       setTranscribeError(null);
+      setChords(null);
+      pendingChordSaveRef.current = false;
+      setChordSaveState("idle");
+      setChordsError(null);
+      setSuggestNote(null);
       setFile(null);
       setReplacingAudio(false);
     } catch (err) {
@@ -601,6 +772,11 @@ export default function ProjectDetailPage() {
       setSaveError(null);
       setNotesError(null);
       setTranscribeError(null);
+      setChords(null);
+      pendingChordSaveRef.current = false;
+      setChordSaveState("idle");
+      setChordsError(null);
+      setSuggestNote(null);
       setReplacingAudio(false);
       setYtUrl("");
       setYtRights(false);
@@ -616,6 +792,11 @@ export default function ProjectDetailPage() {
       setYtImporting(false);
     }
   }
+
+  const melodyEnd =
+    workingNotes && workingNotes.length > 0
+      ? Math.max(...workingNotes.map((n) => n.start_time + n.duration))
+      : 0;
 
   const showUploadForm =
     project?.status === "created" || replacingAudio;
@@ -1109,9 +1290,33 @@ export default function ProjectDetailPage() {
                 onAutoScrollChange={setAutoScroll}
               />
 
+              <ChordsPanel
+                projectId={projectId}
+                chords={chords ?? []}
+                melodyEnd={melodyEnd}
+                saveState={chordSaveState}
+                errorMessage={chordsError}
+                suggestBusy={suggestBusy}
+                suggestNote={suggestNote}
+                onEditChord={handleEditChord}
+                onAddChord={handleAddChord}
+                onDeleteChord={handleDeleteChord}
+                onResetChords={handleResetChords}
+                onSuggestChords={handleSuggestChords}
+              />
+
               {selectedInstrument.fretted ? (
                 <div>
                   <h2 className="mb-2 text-lg font-medium">Tab output</h2>
+                  {chords && chords.length > 0 && (
+                    <>
+                      <ChordStrip chords={chords} melodyEnd={melodyEnd} />
+                      <p className="mb-2 text-xs text-gray-500">
+                        Chords are shown as names only for now — no strummed
+                        chord shapes on the tab yet.
+                      </p>
+                    </>
+                  )}
                   <TabView
                     projectId={projectId}
                     instrumentKey={instrumentKey}
@@ -1122,7 +1327,21 @@ export default function ProjectDetailPage() {
                 </div>
               ) : (
                 <div>
-                  <h2 className="mb-2 text-lg font-medium">Sheet music</h2>
+                  <h2 className="mb-2 text-lg font-medium">
+                    {chords && chords.length > 0
+                      ? "Lead sheet (melody + chords)"
+                      : "Sheet music"}
+                  </h2>
+                  {chords && chords.length > 0 && (
+                    <>
+                      <p className="mb-1 text-xs text-gray-600" data-testid="leadsheet-info">
+                        Lead sheet — {selectedInstrument.label}, 120 bpm, 4/4.
+                        Chord names appear above the staff and in the bar line
+                        below.
+                      </p>
+                      <ChordStrip chords={chords} melodyEnd={melodyEnd} />
+                    </>
+                  )}
                   <SheetMusic
                     projectId={projectId}
                     instrumentKey={instrumentKey}

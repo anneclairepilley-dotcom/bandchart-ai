@@ -12,7 +12,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
 from app import storage
-from app.models import NotesUpdate, Project, ProjectCreate, YoutubeImport
+from app.chords import (
+    CHORD_NAME_HELP,
+    chord_chart_text,
+    is_valid_chord_name,
+    suggest_chords,
+)
+from app.models import ChordsUpdate, NotesUpdate, Project, ProjectCreate, YoutubeImport
 from app.musicxml import INSTRUMENTS, notes_to_musicxml
 from app.pdf import musicxml_to_pdf
 from app.tablature import TUNINGS, build_tab
@@ -297,13 +303,30 @@ def get_notes(project_id: str) -> JSONResponse:
     return JSONResponse(content=data)
 
 
+def _load_transcription_or_404(project_id: str) -> dict:
+    json_path = storage.transcription_json_path(project_id)
+    if not json_path.exists():
+        raise HTTPException(status_code=404, detail="Project has not been transcribed yet")
+    return json.loads(json_path.read_text())
+
+
 def _save_working_notes(project: Project, notes: list[dict]) -> dict:
     """Write the working note list as the current transcription.
 
     transcription.json is the single source every export reads (JSON download
     directly; MusicXML/PDF generate from it on demand), so rewriting it plus
-    the static MIDI file makes every download reflect the edit.
+    the static MIDI file makes every download reflect the edit. Chord markers
+    stored alongside the notes are preserved — editing the melody never
+    touches the chords.
     """
+    existing_chords: list[dict] = []
+    json_path = storage.transcription_json_path(project.id)
+    if json_path.exists():
+        try:
+            existing_chords = json.loads(json_path.read_text()).get("chords", [])
+        except Exception:
+            existing_chords = []
+
     notes = sorted(notes, key=lambda n: n["start_time"])
     data = {
         "project_id": project.id,
@@ -312,6 +335,7 @@ def _save_working_notes(project: Project, notes: list[dict]) -> dict:
         "generated_at": storage.now_iso(),
         "note_count": len(notes),
         "notes": notes,
+        "chords": existing_chords,
     }
     storage.transcription_json_path(project.id).write_text(json.dumps(data, indent=2))
     write_midi_from_notes(notes, storage.midi_path(project.id))
@@ -343,6 +367,91 @@ def reset_notes(project_id: str) -> JSONResponse:
     data = json.loads(original.read_text())
     data = _save_working_notes(project, data["notes"])
     return JSONResponse(content=data)
+
+
+def _save_chords(project_id: str, chords: list[dict]) -> dict:
+    """Store the chord marker list inside transcription.json (kept sorted)."""
+    data = _load_transcription_or_404(project_id)
+    data["chords"] = sorted(chords, key=lambda c: c["start_time"])
+    storage.transcription_json_path(project_id).write_text(json.dumps(data, indent=2))
+    return data
+
+
+@app.get("/api/projects/{project_id}/chords")
+def get_chords(project_id: str) -> JSONResponse:
+    _get_project_or_404(project_id)
+    data = _load_transcription_or_404(project_id)
+    return JSONResponse(content={"chords": data.get("chords", [])})
+
+
+@app.put("/api/projects/{project_id}/chords")
+def update_chords(project_id: str, body: ChordsUpdate) -> JSONResponse:
+    _get_project_or_404(project_id)
+    for marker in body.chords:
+        if not is_valid_chord_name(marker.name.strip()):
+            raise HTTPException(
+                status_code=400,
+                detail=f"'{marker.name}' isn't a valid chord name. {CHORD_NAME_HELP}",
+            )
+    chords = [
+        {"name": c.name.strip(), "start_time": c.start_time} for c in body.chords
+    ]
+    data = _save_chords(project_id, chords)
+    return JSONResponse(content={"chords": data["chords"]})
+
+
+@app.post("/api/projects/{project_id}/chords/suggest")
+def suggest_project_chords(project_id: str) -> JSONResponse:
+    """Rough diatonic chord suggestions from the current melody (replaces the list)."""
+    _get_project_or_404(project_id)
+    data = _load_transcription_or_404(project_id)
+    if not data.get("notes"):
+        raise HTTPException(
+            status_code=400,
+            detail="There are no melody notes to suggest chords from — transcribe "
+            "some audio (or add notes) first.",
+        )
+    try:
+        suggestions = suggest_chords(data["notes"])
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=500,
+            detail=f"Couldn't suggest chords ({exc}). You can still add chords by hand.",
+        ) from exc
+    data = _save_chords(project_id, suggestions)
+    return JSONResponse(
+        content={
+            "chords": data["chords"],
+            "message": "Chord suggestions are a rough starting point. "
+            "Please check and edit them.",
+        }
+    )
+
+
+@app.get("/api/projects/{project_id}/download/chords")
+def download_chord_chart(project_id: str) -> FileResponse:
+    project = _get_project_or_404(project_id)
+    data = _load_transcription_or_404(project_id)
+    chords = data.get("chords", [])
+    if not chords:
+        raise HTTPException(
+            status_code=400,
+            detail="There are no chords yet — add some in the Chords section "
+            "(or use Suggest chords) first.",
+        )
+    notes = data.get("notes", [])
+    melody_end = max((n["start_time"] + n["duration"] for n in notes), default=0.0)
+    try:
+        text = chord_chart_text(project.name, chords, melody_end)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=500,
+            detail=f"Couldn't build the chord chart ({exc}). Try again.",
+        ) from exc
+    out_p = storage.chord_chart_path(project_id)
+    out_p.parent.mkdir(parents=True, exist_ok=True)
+    out_p.write_text(text)
+    return FileResponse(path=str(out_p), media_type="text/plain", filename=out_p.name)
 
 
 @app.get("/api/projects/{project_id}/audio")
@@ -447,6 +556,7 @@ def _generate_musicxml_or_error(project_id: str, instrument: str, style: str) ->
             project_name=project.name,
             out_path=out_p,
             style=style,
+            chords=data.get("chords", []),
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(

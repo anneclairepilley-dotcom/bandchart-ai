@@ -15,8 +15,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-from music21 import clef, instrument, key, metadata, meter, note, stream, tempo
+from music21 import clef, harmony, instrument, key, metadata, meter, note, stream, tempo
 
+from app.chords import m21_chord_figure
 from app.notation_cleanup import clean_notes
 
 TEMPO_BPM = 120
@@ -55,7 +56,7 @@ def _respell_for_key(part: stream.Part, sharps: int) -> None:
     awkward spellings (E#, Cb, double accidentals) always get simplified.
     """
     awkward = {"E#", "B#", "C-", "F-"}
-    for m21_note in part.recurse().notes:
+    for m21_note in part.recurse().getElementsByClass(note.Note):
         pitch = m21_note.pitch
         accidental = pitch.accidental
         if accidental is None:
@@ -81,6 +82,7 @@ def notes_to_musicxml(
     project_name: str,
     out_path: Path,
     style: str = "clean",
+    chords: list[dict[str, Any]] | None = None,
 ) -> Path:
     """Write a MusicXML file for the given detected notes and instrument.
 
@@ -88,6 +90,10 @@ def notes_to_musicxml(
     smoothing, merging, fragment removal, eighth-note quantization) and adds
     an estimated key signature; style="raw" engraves the detection literally
     on a sixteenth grid, exactly as v0.3 did.
+
+    chords: optional manual chord markers ({"name", "start_time"}); they are
+    engraved as chord symbols above the staff (and transpose along with the
+    part for B-flat/E-flat instruments).
     """
     spec = INSTRUMENTS[instrument_key]
 
@@ -151,6 +157,24 @@ def notes_to_musicxml(
         _respell_for_key(part, written_ks.sharps if written_ks is not None else 0)
 
     part.insert(0, clef.bestClef(part, recurse=True))
+
+    # Manual chord markers become chord symbols above the staff. Inserted
+    # AFTER key analysis / respelling / clef choice so an added chord never
+    # changes how the melody itself engraves; transposing instruments get
+    # the symbols transposed to written pitch by hand (toWrittenPitch has
+    # already run). Unparseable names are skipped rather than failing the
+    # export — they still appear in the JSON and the chord chart.
+    for chord_marker in chords or []:
+        try:
+            symbol = harmony.ChordSymbol(m21_chord_figure(chord_marker["name"]))
+            if m21_inst.transposition is not None:
+                symbol.transpose(m21_inst.transposition.reverse(), inPlace=True)
+        except Exception:
+            continue
+        offset_ql = max(
+            0.0, _quantize(chord_marker["start_time"] / SECONDS_PER_QUARTER, grid_ql)
+        )
+        part.insert(offset_ql, symbol)
 
     title = f"{project_name} — {spec['label']}"
     if not cleaned:

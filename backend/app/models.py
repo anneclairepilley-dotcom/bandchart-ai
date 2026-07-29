@@ -43,6 +43,19 @@ class NotesUpdate(BaseModel):
     notes: list[Note]
 
 
+class ChordMarker(BaseModel):
+    """One manual chord symbol placed on the timeline (e.g. Am at 2.0s)."""
+
+    name: str = Field(..., min_length=1, max_length=12)
+    start_time: float = Field(..., ge=0)
+
+
+class ChordsUpdate(BaseModel):
+    """Body of PUT /projects/{id}/chords — the full chord marker list."""
+
+    chords: list[ChordMarker]
+
+
 class YoutubeImport(BaseModel):
     """Body of POST /projects/{id}/youtube."""
 

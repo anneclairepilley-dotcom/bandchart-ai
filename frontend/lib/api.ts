@@ -39,6 +39,12 @@ export interface Note {
   confidence: number;
 }
 
+/** One manual chord symbol on the timeline (e.g. Am starting at 2.0s). */
+export interface ChordMarker {
+  name: string;
+  start_time: number;
+}
+
 export interface NotesResponse {
   project_id: string;
   project_name: string;
@@ -46,6 +52,8 @@ export interface NotesResponse {
   generated_at: string;
   note_count: number;
   notes: Note[];
+  /** Chord markers (v0.9); absent on projects transcribed before then. */
+  chords?: ChordMarker[];
 }
 
 /**
@@ -207,6 +215,40 @@ export function musicxmlDownloadUrl(
   style: SheetStyle = "clean"
 ): string {
   return `${API_BASE_URL}/api/projects/${projectId}/download/musicxml?instrument=${encodeURIComponent(instrumentKey)}&style=${style}`;
+}
+
+/** Save the full chord marker list (replaces what's stored). */
+export function updateChords(
+  projectId: string,
+  chords: ChordMarker[]
+): Promise<{ chords: ChordMarker[] }> {
+  return request<{ chords: ChordMarker[] }>(
+    `/api/projects/${projectId}/chords`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chords }),
+    }
+  );
+}
+
+/**
+ * Ask the backend for rough diatonic chord suggestions from the current
+ * melody. Replaces the stored chord list and returns it with a reminder
+ * that suggestions are only a starting point.
+ */
+export function suggestChords(
+  projectId: string
+): Promise<{ chords: ChordMarker[]; message: string }> {
+  return request<{ chords: ChordMarker[]; message: string }>(
+    `/api/projects/${projectId}/chords/suggest`,
+    { method: "POST" }
+  );
+}
+
+/** Direct URL for downloading the plain-text chord chart. */
+export function chordChartDownloadUrl(projectId: string): string {
+  return `${API_BASE_URL}/api/projects/${projectId}/download/chords`;
 }
 
 /** One cell of the tab preview grid; `i` is the note index it belongs to. */

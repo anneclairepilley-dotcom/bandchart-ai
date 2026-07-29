@@ -1,6 +1,6 @@
 # BandChart AI — Project Notes
 
-Living notes for contributors (human or AI). Last updated after v0.8 (2026-07).
+Living notes for contributors (human or AI). Last updated after v0.9 (2026-07).
 If you are a new Claude Code session: read this file, then README.md, before changing code.
 
 ## Purpose
@@ -138,10 +138,49 @@ Explanations, error messages, and README instructions must stay beginner-friendl
   (e.g. "the added note is present"), not just note_count, and assert on that same
   response body
 
-### v0.9 — planned next
+### v0.9 — chord / lead sheet basics (done)
+- **Manual chord markers first**: stored INSIDE transcription.json under "chords"
+  ([{name, start_time}], kept sorted). `_save_working_notes` reads and re-writes the
+  existing chords, so note edits/deletes/reset NEVER touch them; a fresh
+  transcription/upload starts them at []. Old transcription.json files without the key
+  parse fine (`.get("chords", [])` everywhere, frontend `data.chords ?? []`)
+- `backend/app/chords.py`: name validation (regex — starts A–G, optional #/b, tail of
+  chord letters/digits, optional /bass, ≤12 chars), `m21_chord_figure` (music21 wants
+  '-' for flats: "Bbm7"→"B-m7", only root+bass letters converted), chord chart text
+  (bar grid `| C | G | Am F |` + per-chord timing list; 2s bars at the fixed 120 BPM),
+  and `suggest_chords`: music21 key estimate → per-bar best diatonic triad
+  (duration-weighted pitch-class overlap + root bonus, repeats merged) — deliberately
+  rough, always labelled as a starting point, NOT chord detection from audio
+- Endpoints: GET/PUT `/projects/{id}/chords` (400 friendly message on a bad name),
+  POST `/chords/suggest` (replaces the list, returns the "rough starting point"
+  message; 400 when there are no notes), GET `/download/chords` (chord-chart .txt;
+  400 when the chord list is empty)
+- **Chord symbols on sheet/PDF/MusicXML**: notes_to_musicxml takes chords and inserts
+  music21 harmony.ChordSymbol objects. **Gotchas**: (1) inserted AFTER key analysis,
+  respell and bestClef so chords never change how the melody engraves — which means
+  toWrittenPitch has already run, so transposing instruments get the symbols
+  transposed BY HAND via `symbol.transpose(m21_inst.transposition.reverse())` (alto
+  sax: C→A, Am→F#m — verified); (2) `_respell_for_key` must iterate
+  getElementsByClass(note.Note), NOT `.notes` — ChordSymbol is a NotRest and has no
+  `.pitch` (would crash). OSMD renders the <harmony> elements in the browser sheet and
+  verovio renders them in the PDF — no frontend engraving work needed
+- Frontend: `components/ChordsPanel.tsx` (rows of uncontrolled name/start inputs with
+  the note-table commit pattern, add/suggest/reset/Download Chord Chart buttons,
+  invalid-name/-time errors, non-blocking yellow warning for chords past the melody
+  end) + exported `ChordStrip` (bar-grid line) shown above BOTH the sheet and the tab.
+  Page owns chords state with its own debounced PUT (600ms) that bumps notesVersion so
+  the sheet/tab refetch and show updated symbols; suggest saves server-side (set
+  pendingChordSaveRef=false BEFORE setChords or it double-saves). Sheet heading flips
+  to "Lead sheet (melody + chords)" with an info line (instrument, 120 bpm, 4/4) when
+  chords exist
+- Chords for fretted instruments stay names-only (strip above the tab) — no strummed
+  chord shapes/diagrams yet, stated in the UI
+
+### v1.0 — planned next
 Not decided. Ask the owner. Long-term: v2.0 is still planned as the big black/silver
 redesign (not yet — the owner will ask for it explicitly). Other long-term items (full
-band charts, rehearsal packs) remain unapproved; see out-of-scope below.
+band charts, rehearsal packs, real chord detection from recordings, stem separation)
+remain unapproved; see out-of-scope below.
 
 ### v0.6.2 — verovio made optional for Mac setup (done)
 - verovio sometimes has no wheel for a Mac's Python/OS combo and fails to compile
@@ -310,6 +349,18 @@ Next.js proxy, plus confirmed by the owner in Codespaces:
   upload still works alongside it. PDF export needed one extra step locally
   (`brew install cairo`), after which the whole app works. Codespaces may still get
   bot-blocked by YouTube (expected; local Mac is the reliable path for YouTube import)
+- v0.9: chords unit-tested (name accept/reject lists, Bb→B- figure mapping, chart
+  format, suggestions valid + diatonic for the F-major fixture); API-tested via the
+  proxy (CRUD, invalid-name 400, chart download, chords inside the JSON download,
+  chords surviving a note edit AND notes/reset, suggest save+message, MusicXML with 3
+  <harmony> elements, alto-sax harmony roots transposed +9); PDF visually shows F/Gm/F
+  above the right bars; in-browser (Playwright, 33 checks green): full owner test
+  order — add C, add+rename G, C→Am, delete G, add F, bar numbers, invalid
+  name/start errors, past-end warning appears and clears, lead-sheet heading +
+  info line + strip, chord symbols visible in the OSMD svg, chart download content,
+  suggest flow with rough-note message, note-edit + reset keep chords, tab + strip +
+  Download TAB coexist; upload/transcribe/YouTube-gate/delete regressions green;
+  npm run build + tsc + lint clean
 - v0.8: in-browser (Playwright, 33 checks green): playhead parked visible at start,
   moves smoothly during playback, freezes on pause, keeps moving after a speed change,
   returns to start on stop; tab renders bold/dark fret numbers at text-base for all
@@ -400,6 +451,7 @@ backend/  FastAPI (Python 3.9+; owner's Codespace uses 3.12)
   app/youtube.py        yt-dlp/ffmpeg YouTube audio import (validation + guards)
   app/musicxml.py       music21 export + INSTRUMENTS table (style=clean|raw)
   app/tablature.py      text tab for guitar/bass/ukulele (tunings, octave fit, layout)
+  app/chords.py         chord-name validation, chord chart text, rough suggestions
   app/notation_cleanup.py  wobble/merge/fragment/quantize pipeline for clean style
   app/pdf.py            verovio/cairosvg/pypdf PDF engraving (singleton toolkit + lock)
   app/storage.py        storage/projects/<id>/{project.json,audio/,output/}
@@ -410,6 +462,7 @@ frontend/ Next.js 16 (app router, Tailwind, TypeScript)
   components/PlayAlong.tsx      Web Audio play-along engine + panel (3 synth voices)
   components/SheetMusic.tsx     OSMD sheet render + blue playhead + bar-wash sync
   components/TabView.tsx        text-tab preview for fretted instruments + highlight
+  components/ChordsPanel.tsx    manual chord editor + ChordStrip bar-grid line
   lib/api.ts                    typed fetch helpers; API_BASE_URL defaults to "" (same-origin)
   lib/instruments.ts            instrument keys/labels/offsets (mirror of backend)
   next.config.ts                /api rewrite proxy, 60MB body, 10-min timeout,
