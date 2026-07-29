@@ -129,31 +129,63 @@ export default function TabView({
       ) : (
         <div
           ref={scrollBoxRef}
-          className="max-h-[420px] overflow-auto rounded border border-gray-200 bg-white p-3"
+          className="max-h-[420px] overflow-auto rounded border border-gray-300 bg-white p-4"
           data-testid="tab-scrollbox"
         >
-          <pre className="font-mono text-sm leading-5" data-testid="tab-pre">
+          <pre className="font-mono text-base leading-7" data-testid="tab-pre">
             {data.systems.map((system, sIndex) => (
-              <div key={sIndex} className={sIndex > 0 ? "mt-4" : undefined}>
+              <div key={sIndex} className={sIndex > 0 ? "mt-5" : undefined}>
                 {system.map((line, lIndex) => (
                   <div key={lIndex}>
-                    {line.map((cell, cIndex) => (
-                      <span
-                        key={cIndex}
-                        data-current={
-                          cell.i !== null && cell.i === currentNoteIndex
-                            ? "true"
-                            : undefined
-                        }
-                        className={
-                          cell.i !== null && cell.i === currentNoteIndex
-                            ? "rounded-sm bg-orange-200 text-orange-900"
-                            : undefined
-                        }
-                      >
-                        {cell.t}
-                      </span>
-                    ))}
+                    {line.map((cell, cIndex) => {
+                      const isCurrent =
+                        cell.i !== null && cell.i === currentNoteIndex;
+                      // Frame cells: the string name at the line start, bar
+                      // lines and the trailing edge. Names dark, bars muted.
+                      if (cell.i === null) {
+                        return (
+                          <span
+                            key={cIndex}
+                            className={
+                              cIndex === 0
+                                ? "font-semibold text-gray-900"
+                                : "text-gray-400"
+                            }
+                          >
+                            {cell.t}
+                          </span>
+                        );
+                      }
+                      // Note cells: muted dashes so the string lines read as
+                      // lines, with the fret number itself bold and dark.
+                      const match = /^(-*)([0-9]+|x)$/.exec(cell.t);
+                      return (
+                        <span
+                          key={cIndex}
+                          data-current={isCurrent ? "true" : undefined}
+                          className={
+                            isCurrent ? "rounded-sm bg-orange-200" : undefined
+                          }
+                        >
+                          {match ? (
+                            <>
+                              <span className="text-gray-400">{match[1]}</span>
+                              <span
+                                className={
+                                  match[2] === "x"
+                                    ? "font-bold text-red-600"
+                                    : "font-bold text-gray-900"
+                                }
+                              >
+                                {match[2]}
+                              </span>
+                            </>
+                          ) : (
+                            <span className="text-gray-400">{cell.t}</span>
+                          )}
+                        </span>
+                      );
+                    })}
                   </div>
                 ))}
               </div>

@@ -2,7 +2,7 @@
 
 AI music arranging and rehearsal app that turns songs into editable lead sheets, solo sheets, band charts and custom arrangements.
 
-## v0.7 — Transcription + Solo Parts + Sheet Music + Play Along + Editing + YouTube Import + Tab
+## v0.8 — Transcription + Solo Parts + Sheet Music + Play Along + Note Editing + YouTube Import + Tab
 
 This is the smallest possible working prototype: a local web app where you upload an audio
 file and the backend runs **real audio-to-pitch transcription** using
@@ -52,14 +52,18 @@ environments with newer Python versions.
   synthesizer voices instead of harsh beeps
 - **Sheet music in the browser**: the generated notation renders right on the project page
   (via OpenSheetMusicDisplay), for the selected instrument and style — and it's the main
-  play-along surface: an orange box highlights the current notes, a lighter wash marks the
-  current bar, the cursor sits visibly at the start before you play, returns there on
-  Stop, and the sheet auto-scrolls to keep the current bar in view
+  play-along surface: a thin **blue playhead** glides continuously through the notes as
+  they play (v0.8), a light blue wash marks the current bar, the playhead sits visibly at
+  the start before you play, freezes on Pause, returns to the start on Stop, and the
+  sheet auto-scrolls to keep the current bar in view
 - **Auto-scroll** (on by default, toggleable): the sheet music, piano roll and note table
   keep the current note in view while playing
-- **Delete wrong notes**: a ✕ button on each row of the note table removes a misdetected
-  note — the preview, playback, sheet music and every download update automatically, and
-  "Reset to original transcription" undoes all edits
+- **Fix wrong notes** (v0.8): the note table is editable — type a new pitch (a note name
+  like G4 or F#3, or a MIDI number), start time or duration into any row and press Enter;
+  **+ Add a note** appends a note you can then adjust; ✕ deletes a wrong note. The
+  preview, playback, sheet music, tab and every download update automatically, and
+  "Reset to original transcription" undoes all edits. Invalid values get a clear error
+  message instead of breaking anything
 - **Delete projects**: a Delete button beside each project on the dashboard removes the
   project with its uploaded audio and generated files, after a confirmation prompt
 
@@ -253,8 +257,8 @@ contain the untouched detection regardless of the style toggle.
 
 1. Open a transcribed project and find the **Play Along** panel (below the download buttons)
 2. Click **Play** — after the optional 4-click count-in you'll hear the detected notes,
-   and the **sheet music follows along**: the orange box moves note to note, the light
-   wash tracks the current bar, and the score scrolls itself. (The note table highlights
+   and the **sheet music follows along**: a thin blue playhead glides through the
+   notes, the light blue wash tracks the current bar, and the score scrolls itself. (The note table highlights
    too, and a piano-roll view lives under "Advanced note timeline" if you want it.)
 3. **Pause** freezes playback where it is; pressing **Play** again continues from there;
    **Stop** resets to the beginning
@@ -297,12 +301,23 @@ view returns. Delete a note in the note table and watch the tab column disappear
 
 ### Fixing wrong notes (beginner steps)
 
+Since v0.8 you can **edit** notes, not just delete them.
+
 1. In the **Note detail** table, find the wrongly detected note (playing along and watching
    the highlight is the easiest way to spot it)
-2. Click the red **✕** at the end of its row — the note disappears from the preview, the
-   sheet music, playback, and all downloads (a "Edits saved" note confirms it)
-3. Deleted too much? Click **Reset to original transcription** to get everything back
-4. The sheet music panel and the downloads always match what's left in the table
+2. **Fix the pitch**: click the pitch box, type the right note — a name like `G4`, `F#3`
+   or `Bb3`, or a MIDI number — and press Enter (or click away)
+3. **Fix the timing**: the start time and duration boxes work the same way (seconds)
+4. **Add a missing note**: click **+ Add a note** under the table — a new note appears
+   after the last one; then type in the pitch and timing you want
+5. Still wrong? Click the red **✕** at the end of a row to delete that note entirely
+6. Every change auto-saves (an "Edits saved" note confirms it) and updates the preview,
+   the sheet music, the tab, playback and all downloads — there is nothing extra to
+   regenerate
+7. If you type something invalid (like `H9` or a negative time) you get a clear red
+   message and nothing changes
+8. Changed your mind? Click **Reset to original transcription** to get the untouched
+   detection back
 
 | API | Method | Path |
 | --- | --- | --- |
