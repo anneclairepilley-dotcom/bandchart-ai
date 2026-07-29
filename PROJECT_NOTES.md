@@ -1,6 +1,6 @@
 # BandChart AI — Project Notes
 
-Living notes for contributors (human or AI). Last updated after v0.7 (2026-07).
+Living notes for contributors (human or AI). Last updated after v0.8 (2026-07).
 If you are a new Claude Code session: read this file, then README.md, before changing code.
 
 ## Purpose
@@ -101,7 +101,44 @@ Explanations, error messages, and README instructions must stay beginner-friendl
 - Tab is generated from the detected melody line — it is NOT full guitar/bass extraction
   from a mixed song, and there are no chords (still monophonic)
 
-### v0.8 — planned next
+### v0.8 — blue playhead, readable tab, note editing (done)
+- **Blue sheet playhead** (SheetMusic.tsx): the orange note-box cursor is gone. OSMD now
+  has cursor 0 = light BLUE measure wash (visible) and cursor 1 = an INVISIBLE (alpha 0)
+  note-box cursor used ONLY at load time: it is walked once to record every entry's
+  {time, x, top, height} (update() + fixCursorSize() per step, then hide()). The visible
+  note follower is our own absolutely-positioned 3px blue div (data-testid
+  sheet-playhead), placed by interpolating between the current and next entry's x within
+  a system on every play tick — so it GLIDES rather than jumps. Pause freezes it (the
+  transport stops ticking), stop parks it at entry 0, speed changes stay in sync because
+  it's driven purely by transport position. It lives as a SIBLING of the OSMD container
+  inside a position:relative wrapper (OSMD clears the container's innerHTML on reload —
+  the playhead must not be inside it); entry offsets are relative to that wrapper.
+  fixCursorSize() is still required (the Tailwind img-collapse gotcha from v0.5.6)
+- **Tab readability** (tablature.py + TabView.tsx): note columns widened to a 3-dash
+  prefix (both the .txt download and the preview — the layout still lives ONLY in
+  Python); preview font text-sm→text-base, leading-7, p-4; string names dark+semibold,
+  dashes/bars muted gray-400 so the lines read as strings, fret numbers font-bold
+  near-black, out-of-range x bold red. Orange current-column highlight kept
+- **Inline note editing** (page.tsx): the note table's pitch/start/duration cells are now
+  UNCONTROLLED inputs committing on blur/Enter; row keys include the note values so rows
+  re-mount (fresh defaultValue) whenever a note actually changes — that's how reset and
+  external updates refresh the inputs. Pitch accepts note names (G4, F#3, Bb3 — parsed
+  by parsePitchInput) or MIDI 0-127; start ≥ 0; duration > 0 (mirrors backend Note model
+  bounds). Invalid input → clear red message (editError, data-testid edit-error), state
+  untouched. "+ Add a note" appends after the last note (same pitch, 0.5s) — also
+  offered in the all-notes-deleted empty state. Every commit re-SORTS the working copy
+  by start_time — playback scheduling, noteIndexAt, and the tab's note_index mapping all
+  assume sorted order; keep that invariant. Saving reuses the existing debounced PUT, so
+  JSON/MIDI/MusicXML/PDF/tab all regenerate with no extra "regenerate" button needed
+- No backend changes beyond the tab spacing — PUT /notes validation already covered edits
+- **Testing gotcha (hard-won)**: reading /api/.../notes IMMEDIATELY after a save from
+  test code can return a stale body (parallel in-flight GETs resolve out of order under
+  Playwright's waitForFunction polling). The app itself is fine — its PUTs were traced
+  and are single, ordered and correct. In tests, wait on a CONTENT-specific predicate
+  (e.g. "the added note is present"), not just note_count, and assert on that same
+  response body
+
+### v0.9 — planned next
 Not decided. Ask the owner. Long-term: v2.0 is still planned as the big black/silver
 redesign (not yet — the owner will ask for it explicitly). Other long-term items (full
 band charts, rehearsal packs) remain unapproved; see out-of-scope below.
@@ -273,6 +310,16 @@ Next.js proxy, plus confirmed by the owner in Codespaces:
   upload still works alongside it. PDF export needed one extra step locally
   (`brew install cairo`), after which the whole app works. Codespaces may still get
   bot-blocked by YouTube (expected; local Mac is the reliable path for YouTube import)
+- v0.8: in-browser (Playwright, 33 checks green): playhead parked visible at start,
+  moves smoothly during playback, freezes on pause, keeps moving after a speed change,
+  returns to start on stop; tab renders bold/dark fret numbers at text-base for all
+  three instruments and the .txt download carries the wider spacing; pitch/duration/
+  start edits land in the saved JSON and the tab preview, invalid pitch/duration/start
+  each show their message and change nothing, delete + add note verified end to end
+  (added note appended after the last, Play Along total updates), MIDI verified by
+  pretty_midi round-trip after a pitch edit and after reset, MusicXML contains the
+  edited pitch; upload→transcribe, YouTube validation errors, project delete and all
+  download endpoints re-checked green; npm run build + tsc + lint clean
 - v0.7 tab: fret mapping unit-tested (guitar melody on the top string, bass auto-shift
   −2 octaves with warning, ukulele open strings, mixed-extreme melody gets `x` + both
   warnings, empty list, TabError on piano); all three .txt downloads verified via the
@@ -361,7 +408,7 @@ frontend/ Next.js 16 (app router, Tailwind, TypeScript)
   app/projects/[id]/page.tsx    the whole project workflow UI (memoized NoteTable inside,
                                 note-edit working copy + debounced auto-save)
   components/PlayAlong.tsx      Web Audio play-along engine + panel (3 synth voices)
-  components/SheetMusic.tsx     OSMD sheet render + playback cursor sync
+  components/SheetMusic.tsx     OSMD sheet render + blue playhead + bar-wash sync
   components/TabView.tsx        text-tab preview for fretted instruments + highlight
   lib/api.ts                    typed fetch helpers; API_BASE_URL defaults to "" (same-origin)
   lib/instruments.ts            instrument keys/labels/offsets (mirror of backend)

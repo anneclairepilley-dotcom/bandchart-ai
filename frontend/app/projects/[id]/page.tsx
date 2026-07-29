@@ -30,6 +30,37 @@ import SheetMusic from "@/components/SheetMusic";
 import TabView from "@/components/TabView";
 import type { Note } from "@/lib/api";
 
+/** Keep the working notes ordered by start time — playback scheduling, the
+ * current-note highlight and the backend all assume this order. */
+function sortNotes(notes: Note[]): Note[] {
+  return [...notes].sort((a, b) => a.start_time - b.start_time);
+}
+
+const PITCH_CLASSES: Record<string, number> = {
+  C: 0,
+  D: 2,
+  E: 4,
+  F: 5,
+  G: 7,
+  A: 9,
+  B: 11,
+};
+
+/** Accepts a note name ("G4", "F#3", "Bb3") or a MIDI number ("67"). */
+function parsePitchInput(raw: string): number | null {
+  const s = raw.trim();
+  if (/^\d+$/.test(s)) {
+    const n = parseInt(s, 10);
+    return n >= 0 && n <= 127 ? n : null;
+  }
+  const m = /^([A-Ga-g])([#♯b♭]?)(-?\d+)$/.exec(s);
+  if (!m) return null;
+  const base = PITCH_CLASSES[m[1].toUpperCase()];
+  const accidental = m[2] === "#" || m[2] === "♯" ? 1 : m[2] ? -1 : 0;
+  const midi = (parseInt(m[3], 10) + 1) * 12 + base + accidental;
+  return midi >= 0 && midi <= 127 ? midi : null;
+}
+
 // Memoized so the 60fps play-along position updates don't re-render every
 // table row; the current-note index only changes when the note changes.
 const NoteTable = memo(function NoteTable({
@@ -39,6 +70,7 @@ const NoteTable = memo(function NoteTable({
   currentIndex,
   autoScroll,
   onDelete,
+  onEdit,
 }: {
   notes: Note[];
   writtenLabel: string;
@@ -46,6 +78,11 @@ const NoteTable = memo(function NoteTable({
   currentIndex: number | null;
   autoScroll: boolean;
   onDelete: (index: number) => void;
+  onEdit: (
+    index: number,
+    field: "pitch" | "start_time" | "duration",
+    raw: string
+  ) => void;
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
 
@@ -85,7 +122,9 @@ const NoteTable = memo(function NoteTable({
         <tbody>
           {notes.map((note, i) => (
             <tr
-              key={`${note.start_time}-${note.pitch}-${i}`}
+              // Values in the key re-mount the row's uncontrolled inputs
+              // whenever a note actually changes (edit commit, reset).
+              key={`${note.start_time}-${note.pitch}-${note.duration}-${i}`}
               data-playing={i === currentIndex ? "true" : undefined}
               className={
                 i === currentIndex
@@ -93,10 +132,50 @@ const NoteTable = memo(function NoteTable({
                   : "border-t border-gray-100 odd:bg-white even:bg-gray-50"
               }
             >
-              <td className="p-2">{note.pitch_name}</td>
+              <td className="p-2">
+                <input
+                  type="text"
+                  defaultValue={note.pitch_name}
+                  onBlur={(e) => onEdit(i, "pitch", e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") e.currentTarget.blur();
+                  }}
+                  data-testid={`pitch-input-${i}`}
+                  aria-label={`Pitch of note ${i + 1}`}
+                  className="w-16 rounded border border-gray-300 px-2 py-1 text-sm"
+                />
+              </td>
               <td className="p-2">{midiNoteName(note.pitch + writtenOffset)}</td>
-              <td className="p-2">{note.start_time.toFixed(3)}</td>
-              <td className="p-2">{note.duration.toFixed(3)}</td>
+              <td className="p-2">
+                <input
+                  type="number"
+                  step={0.01}
+                  min={0}
+                  defaultValue={note.start_time.toFixed(3)}
+                  onBlur={(e) => onEdit(i, "start_time", e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") e.currentTarget.blur();
+                  }}
+                  data-testid={`start-input-${i}`}
+                  aria-label={`Start time of note ${i + 1}`}
+                  className="w-24 rounded border border-gray-300 px-2 py-1 text-sm"
+                />
+              </td>
+              <td className="p-2">
+                <input
+                  type="number"
+                  step={0.01}
+                  min={0.01}
+                  defaultValue={note.duration.toFixed(3)}
+                  onBlur={(e) => onEdit(i, "duration", e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") e.currentTarget.blur();
+                  }}
+                  data-testid={`duration-input-${i}`}
+                  aria-label={`Duration of note ${i + 1}`}
+                  className="w-24 rounded border border-gray-300 px-2 py-1 text-sm"
+                />
+              </td>
               <td className="p-2">{(note.confidence * 100).toFixed(0)}%</td>
               <td className="p-2 text-right">
                 <button
@@ -229,6 +308,84 @@ export default function ProjectDetailPage() {
     );
   }, []);
 
+  // Validation errors from inline note edits (invalid pitch/start/duration).
+  const [editError, setEditError] = useState<string | null>(null);
+
+  const handleEditNote = useCallback(
+    (index: number, field: "pitch" | "start_time" | "duration", raw: string) => {
+      const current = workingNotes?.[index];
+      if (!current) return;
+
+      let patch: Partial<Note>;
+      if (field === "pitch") {
+        const midi = parsePitchInput(raw);
+        if (midi === null) {
+          setEditError(
+            `"${raw.trim() || "(empty)"}" isn't a valid pitch. Use a note name ` +
+              "like G4, F#3 or Bb3, or a MIDI number from 0 to 127."
+          );
+          return;
+        }
+        if (midi === current.pitch) {
+          setEditError(null);
+          return;
+        }
+        patch = { pitch: midi, pitch_name: midiNoteName(midi) };
+      } else {
+        const value = Number(raw);
+        if (field === "start_time") {
+          if (raw.trim() === "" || !Number.isFinite(value) || value < 0) {
+            setEditError(
+              "Start time must be a number of seconds, 0 or more (e.g. 1.5)."
+            );
+            return;
+          }
+        } else if (raw.trim() === "" || !Number.isFinite(value) || value <= 0) {
+          setEditError(
+            "Duration must be a number of seconds greater than 0 (e.g. 0.5)."
+          );
+          return;
+        }
+        if (Math.abs(value - current[field]) < 1e-9) {
+          setEditError(null);
+          return;
+        }
+        patch = { [field]: value };
+      }
+
+      setEditError(null);
+      pendingSaveRef.current = true;
+      setSaveState("saving");
+      setWorkingNotes((notes) =>
+        notes
+          ? sortNotes(notes.map((n, i) => (i === index ? { ...n, ...patch } : n)))
+          : notes
+      );
+    },
+    [workingNotes]
+  );
+
+  const handleAddNote = useCallback(() => {
+    setEditError(null);
+    pendingSaveRef.current = true;
+    setSaveState("saving");
+    setWorkingNotes((current) => {
+      const list = current ?? [];
+      const last = list.length > 0 ? list[list.length - 1] : null;
+      const pitch = last ? last.pitch : 60;
+      const newNote: Note = {
+        pitch,
+        pitch_name: midiNoteName(pitch),
+        start_time: last
+          ? Number((last.start_time + last.duration).toFixed(3))
+          : 0,
+        duration: 0.5,
+        confidence: 1,
+      };
+      return sortNotes([...list, newNote]);
+    });
+  }, []);
+
   const handleResetNotes = useCallback(async () => {
     setSaveState("saving");
     try {
@@ -238,6 +395,7 @@ export default function ProjectDetailPage() {
       setNotes(data);
       setSaveState("idle");
       setSaveError(null);
+      setEditError(null);
       setNotesVersion((v) => v + 1);
     } catch (err) {
       setSaveState("error");
@@ -1017,6 +1175,14 @@ export default function ProjectDetailPage() {
                     {saveError}
                   </p>
                 )}
+                {editError && (
+                  <p
+                    data-testid="edit-error"
+                    className="mb-2 rounded border border-red-200 bg-red-50 p-2 text-sm text-red-700"
+                  >
+                    {editError}
+                  </p>
+                )}
                 <NoteTable
                   notes={workingNotes}
                   writtenLabel={selectedInstrument.label}
@@ -1024,11 +1190,24 @@ export default function ProjectDetailPage() {
                   currentIndex={playNoteIndex}
                   autoScroll={autoScroll}
                   onDelete={handleDeleteNote}
+                  onEdit={handleEditNote}
                 />
-                <p className="mt-1 text-xs text-gray-500">
-                  Click ✕ to delete a wrongly detected note — the preview,
-                  playback and all downloads update automatically.
-                </p>
+                <div className="mt-2 flex flex-wrap items-start justify-between gap-2">
+                  <p className="text-xs text-gray-500">
+                    Type in a pitch (like G4 or F#3), start time or duration
+                    and press Enter (or click away) to fix a wrong note.
+                    Click ✕ to delete one. The preview, playback, tab and all
+                    downloads update automatically.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleAddNote}
+                    data-testid="add-note"
+                    className="rounded border border-gray-300 px-3 py-1 text-xs font-medium hover:bg-gray-50"
+                  >
+                    + Add a note
+                  </button>
+                </div>
               </div>
             </>
           )}
@@ -1036,13 +1215,22 @@ export default function ProjectDetailPage() {
           {notes && workingNotes && workingNotes.length === 0 && notes.note_count !== 0 && (
             <div className="rounded border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800">
               <p className="mb-2">All notes have been deleted.</p>
-              <button
-                type="button"
-                onClick={handleResetNotes}
-                className="rounded border border-yellow-400 px-3 py-1 text-xs font-medium hover:bg-yellow-100"
-              >
-                Reset to original transcription
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={handleResetNotes}
+                  className="rounded border border-yellow-400 px-3 py-1 text-xs font-medium hover:bg-yellow-100"
+                >
+                  Reset to original transcription
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAddNote}
+                  className="rounded border border-yellow-400 px-3 py-1 text-xs font-medium hover:bg-yellow-100"
+                >
+                  + Add a note
+                </button>
+              </div>
             </div>
           )}
         </section>

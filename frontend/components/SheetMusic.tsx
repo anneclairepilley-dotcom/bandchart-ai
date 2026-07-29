@@ -51,8 +51,11 @@ export default function SheetMusic({
 }: SheetMusicProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollBoxRef = useRef<HTMLDivElement>(null);
+  const playheadRef = useRef<HTMLDivElement>(null);
   const osmdRef = useRef<OpenSheetMusicDisplay | null>(null);
-  const entryTimesRef = useRef<number[]>([]);
+  const entriesRef = useRef<
+    { time: number; x: number; top: number; height: number }[]
+  >([]);
   const cursorStepRef = useRef(-1);
 
   // Load state is keyed by the current inputs so a deps change implicitly
@@ -69,6 +72,7 @@ export default function SheetMusic({
 
   useEffect(() => {
     let cancelled = false;
+    const playheadEl = playheadRef.current;
 
     async function loadSheet() {
       try {
@@ -95,11 +99,14 @@ export default function SheetMusic({
           drawComposer: false,
           drawCredits: false,
           drawPartNames: true,
-          // Two simultaneous cursors, Songsterr-style: a soft wash over the
-          // whole current measure plus a stronger box on the current notes.
+          // Cursor 0: a soft blue wash over the current measure (visible).
+          // Cursor 1: an INVISIBLE note-box cursor (alpha 0) used only to
+          // measure each entry's x/y position at load time — the visible
+          // note follower is our own blue playhead div, positioned by
+          // interpolating between those measured positions.
           cursorsOptions: [
-            { type: 3, color: "#f97316", alpha: 0.12, follow: false },
-            { type: 0, color: "#f97316", alpha: 0.45, follow: false },
+            { type: 3, color: "#3b82f6", alpha: 0.1, follow: false },
+            { type: 0, color: "#000000", alpha: 0, follow: false },
           ],
         });
         await osmd.load(xml);
@@ -107,29 +114,41 @@ export default function SheetMusic({
         osmd.render();
         osmdRef.current = osmd;
 
-        // Walk one cursor once to collect every entry's timestamp so playback
-        // can jump the cursors to the right step deterministically.
-        const times: number[] = [];
-        const walker = osmd.cursors[0];
+        // Walk the invisible note cursor once to collect every entry's
+        // timestamp AND on-sheet position (x, top, height), so the blue
+        // playhead can be placed and interpolated deterministically.
+        const entries: { time: number; x: number; top: number; height: number }[] = [];
+        const walker = osmd.cursors[1];
         walker.show();
         walker.reset();
         let guard = 0;
         while (!walker.Iterator.EndReached && guard < 10000) {
-          times.push(
-            walker.Iterator.currentTimeStamp.RealValue * SECONDS_PER_WHOLE_NOTE
-          );
+          walker.update();
+          fixCursorSize(walker);
+          const el = walker.cursorElement;
+          entries.push({
+            time:
+              walker.Iterator.currentTimeStamp.RealValue *
+              SECONDS_PER_WHOLE_NOTE,
+            x: el ? el.offsetLeft : 0,
+            top: el ? el.offsetTop : 0,
+            height: el
+              ? el.offsetHeight ||
+                parseInt(el.getAttribute("height") || "40", 10)
+              : 40,
+          });
           walker.next();
           guard += 1;
         }
-        // Park every cursor visibly at the start — the user should always
-        // see where playback will begin on the sheet.
-        for (const cursor of osmd.cursors) {
-          cursor.show();
-          cursor.reset();
-          cursor.update();
-          fixCursorSize(cursor);
-        }
-        entryTimesRef.current = times;
+        walker.hide();
+        // Park the measure wash visibly at the start — the user should
+        // always see where playback will begin on the sheet.
+        const wash = osmd.cursors[0];
+        wash.show();
+        wash.reset();
+        wash.update();
+        fixCursorSize(wash);
+        entriesRef.current = entries;
         cursorStepRef.current = 0;
         setResult({ key: depsKey, state: "ready" });
       } catch (err) {
@@ -147,58 +166,86 @@ export default function SheetMusic({
     return () => {
       cancelled = true;
       osmdRef.current = null;
-      entryTimesRef.current = [];
+      entriesRef.current = [];
       cursorStepRef.current = -1;
+      // Hide the playhead while a new sheet loads (it's a sibling of the
+      // OSMD container, so clearing the container doesn't remove it).
+      if (playheadEl) {
+        playheadEl.style.display = "none";
+      }
     };
   }, [projectId, instrumentKey, sheetStyle, notesVersion, depsKey]);
 
-  // Follow the play-along transport with OSMD's cursors. When playback is
-  // stopped (position null) the cursors return to the start and stay visible.
+  // Follow the play-along transport. The measure wash steps entry to entry;
+  // the blue playhead moves CONTINUOUSLY, interpolating between the current
+  // entry's position and the next one's within the same system. Pause simply
+  // stops the position updates (the playhead freezes); stop (position null)
+  // parks everything back at the first entry.
   useEffect(() => {
     const osmd = osmdRef.current;
     if (!osmd || loadState !== "ready") return;
-    const cursors = osmd.cursors;
-    const times = entryTimesRef.current;
+    const entries = entriesRef.current;
+    if (entries.length === 0) return;
 
     // Target: the last entry at or before the transport position, or the
     // very first entry when stopped.
     let target = 0;
     if (playPosition !== null) {
-      for (let i = 0; i < times.length; i++) {
-        if (times[i] <= playPosition + 1e-6) target = i;
+      for (let i = 0; i < entries.length; i++) {
+        if (entries[i].time <= playPosition + 1e-6) target = i;
         else break;
       }
     }
-    if (target === cursorStepRef.current) return;
 
-    if (target < cursorStepRef.current) {
-      for (const cursor of cursors) {
-        cursor.reset();
+    // Step the measure wash only when the entry actually changes.
+    if (target !== cursorStepRef.current) {
+      const wash = osmd.cursors[0];
+      if (target < cursorStepRef.current) {
+        wash.reset();
+        cursorStepRef.current = 0;
       }
-      cursorStepRef.current = 0;
-    }
-    let guard = 0;
-    while (cursorStepRef.current < target && guard < 10000) {
-      for (const cursor of cursors) {
-        cursor.next();
+      let guard = 0;
+      while (cursorStepRef.current < target && guard < 10000) {
+        wash.next();
+        cursorStepRef.current += 1;
+        guard += 1;
       }
-      cursorStepRef.current += 1;
-      guard += 1;
-    }
-    for (const cursor of cursors) {
-      cursor.update();
-      fixCursorSize(cursor);
+      wash.update();
+      fixCursorSize(wash);
     }
 
-    const noteCursor = cursors[cursors.length - 1];
-    if (autoScroll && noteCursor.cursorElement && scrollBoxRef.current) {
+    // Position the blue playhead (every tick — it moves within an entry).
+    const ph = playheadRef.current;
+    const cur = entries[target];
+    if (ph) {
+      const next = entries[target + 1];
+      let x = cur.x;
+      if (
+        playPosition !== null &&
+        next &&
+        next.top === cur.top &&
+        next.time > cur.time
+      ) {
+        const f = Math.min(
+          1,
+          Math.max(0, (playPosition - cur.time) / (next.time - cur.time))
+        );
+        x = cur.x + (next.x - cur.x) * f;
+      }
+      ph.style.left = `${x}px`;
+      ph.style.top = `${cur.top}px`;
+      ph.style.height = `${Math.max(24, cur.height)}px`;
+      ph.style.display = "block";
+    }
+
+    if (autoScroll && scrollBoxRef.current) {
       const box = scrollBoxRef.current;
-      const cursorTop = noteCursor.cursorElement.offsetTop;
+      const phTop = cur.top;
       const viewTop = box.scrollTop;
       const viewBottom = viewTop + box.clientHeight;
-      if (cursorTop < viewTop + 40 || cursorTop > viewBottom - 80) {
+      if (phTop < viewTop + 40 || phTop > viewBottom - 80) {
         box.scrollTo({
-          top: Math.max(0, cursorTop - box.clientHeight / 3),
+          top: Math.max(0, phTop - box.clientHeight / 3),
           behavior: "smooth",
         });
       }
@@ -225,12 +272,21 @@ export default function SheetMusic({
         className="max-h-[600px] overflow-y-auto rounded border border-gray-200 bg-white p-2"
         data-testid="sheet-scrollbox"
       >
-        <div ref={containerRef} />
+        <div className="relative">
+          <div ref={containerRef} />
+          <div
+            ref={playheadRef}
+            data-testid="sheet-playhead"
+            className="pointer-events-none absolute w-[3px] rounded-full bg-blue-600/80"
+            style={{ display: "none" }}
+          />
+        </div>
       </div>
       <p className="mt-1 text-xs text-gray-500">
-        The orange box marks the current notes and the lighter wash the
-        current bar. The cursor follows the sheet&apos;s beat grid, so it can
-        sit slightly off the literal recording timing.
+        The blue line is the playhead — it glides through the notes as they
+        play, and the light blue wash marks the current bar. It follows the
+        sheet&apos;s beat grid, so it can sit slightly off the literal
+        recording timing.
       </p>
     </div>
   );

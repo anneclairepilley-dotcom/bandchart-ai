@@ -227,7 +227,9 @@ def _layout_systems(
                 "token": token,
                 "line": entry["string"],
                 "note_index": entry["note_index"],
-                "width": 2 + len(token),
+                # Three leading dashes per column (v0.8): breathing room makes
+                # the fret numbers much easier to read.
+                "width": 3 + len(token),
             }
         )
 
@@ -256,7 +258,7 @@ def _layout_systems(
                 if col["bar"]:
                     cells.append({"t": "|", "i": None})
                 elif col["line"] == line_index:
-                    cells.append({"t": "--" + col["token"], "i": col["note_index"]})
+                    cells.append({"t": "---" + col["token"], "i": col["note_index"]})
                 else:
                     cells.append({"t": "-" * col["width"], "i": col["note_index"]})
             cells.append({"t": "-|", "i": None})
