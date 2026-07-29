@@ -3,12 +3,15 @@
 import type { ChordMarker } from "@/lib/api";
 import { chordChartDownloadUrl } from "@/lib/api";
 
-// One 4/4 bar = 2 seconds at the app's fixed 120 BPM — the same grid the
-// sheet music, tab and chord chart all use.
+// One 4/4 bar = 2 seconds at the app's fixed 120 BPM (3/4 and 6/8 bars are
+// 1.5s) — the same grid the sheet music, tab and chord chart use.
 export const SECONDS_PER_BAR = 2;
 
-export function chordBarNumber(startTime: number): number {
-  return Math.floor(Math.max(0, startTime) / SECONDS_PER_BAR) + 1;
+export function chordBarNumber(
+  startTime: number,
+  secondsPerBar: number = SECONDS_PER_BAR
+): number {
+  return Math.floor(Math.max(0, startTime) / secondsPerBar) + 1;
 }
 
 // Mirrors the backend's chord-name rule (backend/app/chords.py):
@@ -28,18 +31,20 @@ export function isValidChordName(name: string): boolean {
 export function ChordStrip({
   chords,
   melodyEnd,
+  secondsPerBar = SECONDS_PER_BAR,
 }: {
   chords: ChordMarker[];
   melodyEnd: number;
+  secondsPerBar?: number;
 }) {
   if (chords.length === 0) return null;
   const lastBar = Math.max(
-    chordBarNumber(chords[chords.length - 1].start_time),
-    melodyEnd > 0 ? chordBarNumber(Math.max(0, melodyEnd - 1e-9)) : 1
+    chordBarNumber(chords[chords.length - 1].start_time, secondsPerBar),
+    melodyEnd > 0 ? chordBarNumber(Math.max(0, melodyEnd - 1e-9), secondsPerBar) : 1
   );
   const byBar = new Map<number, string[]>();
   for (const c of chords) {
-    const bar = chordBarNumber(c.start_time);
+    const bar = chordBarNumber(c.start_time, secondsPerBar);
     byBar.set(bar, [...(byBar.get(bar) ?? []), c.name]);
   }
   const cells: string[] = [];
@@ -61,6 +66,10 @@ interface ChordsPanelProps {
   chords: ChordMarker[];
   /** End of the melody in seconds — used to warn about chords past the end. */
   melodyEnd: number;
+  /** Bar length in seconds (2 for 4/4, 1.5 for 3/4 and 6/8). */
+  secondsPerBar?: number;
+  /** The project's time signature, for the helper copy. */
+  timeSignature?: string;
   saveState: "idle" | "saving" | "saved" | "error";
   errorMessage: string | null;
   suggestBusy: boolean;
@@ -86,6 +95,8 @@ export default function ChordsPanel({
   projectId,
   chords,
   melodyEnd,
+  secondsPerBar = SECONDS_PER_BAR,
+  timeSignature = "4/4",
   saveState,
   errorMessage,
   suggestBusy,
@@ -115,8 +126,9 @@ export default function ChordsPanel({
       </div>
       <p className="mb-3 text-xs text-gray-500">
         Add chord names above your melody — like C, Am, F#m7, Bb or G/B. One
-        bar is 2 seconds (the app&apos;s fixed 120 bpm, 4/4). Chords appear on
-        the sheet music, in the chord line, and in the downloads.
+        bar is {secondsPerBar} seconds (the app&apos;s fixed 120 bpm,{" "}
+        {timeSignature}). Chords appear on the sheet music, in the chord
+        line, and in the downloads.
       </p>
 
       {errorMessage && (
@@ -194,7 +206,7 @@ export default function ChordsPanel({
                 <span className="text-gray-600">seconds</span>
               </label>
               <span className="text-xs text-gray-500">
-                (bar {chordBarNumber(chord.start_time)})
+                (bar {chordBarNumber(chord.start_time, secondsPerBar)})
               </span>
               <button
                 type="button"

@@ -23,6 +23,13 @@ class Project(BaseModel):
     source_url: Optional[str] = None
     rights_confirmed: Optional[bool] = None
     imported_at: Optional[str] = None
+    # v0.9.1 setup choices (all None on older projects; sensible defaults
+    # are applied wherever they're read).
+    instrument: Optional[str] = None
+    mode: Optional[str] = None  # "direct_transcription" | "solo_arrangement"
+    time_signature: Optional[str] = None  # "predict" | "4/4" | "3/4" | "6/8"
+    key_signature: Optional[str] = None  # "predict" | "C" | "G" | ... | "Dm"
+    rhythm_detail: Optional[str] = None  # "readable" | "precise"
 
 
 class ProjectCreate(BaseModel):
@@ -61,6 +68,16 @@ class YoutubeImport(BaseModel):
 
     url: str
     rights_confirmed: bool = False
+
+
+class ProjectSettings(BaseModel):
+    """Body of POST /projects/{id}/settings — the pre-transcription choices."""
+
+    instrument: str
+    mode: str
+    time_signature: str = "predict"
+    key_signature: str = "predict"
+    rhythm_detail: str = "readable"
 
 
 class TranscriptionResult(BaseModel):

@@ -12,18 +12,34 @@ starts and lengths quantized to sixteenth notes.
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any
 
-from music21 import clef, harmony, instrument, key, metadata, meter, note, stream, tempo
+from music21 import (
+    clef,
+    harmony,
+    instrument,
+    key,
+    layout,
+    metadata,
+    meter,
+    note,
+    stream,
+    tempo,
+)
 
-from app.chords import m21_chord_figure
-from app.notation_cleanup import clean_notes
+from app.chords import KEY_SHARPS, m21_chord_figure
+from app.notation_cleanup import clean_notes, make_readable
 
 TEMPO_BPM = 120
 SECONDS_PER_QUARTER = 60 / TEMPO_BPM
 QUANT = 0.25  # sixteenth-note grid, in quarter lengths
 MIN_QL = 0.25
+
+VALID_TIME_SIGNATURES = ("4/4", "3/4", "6/8")
+# Piano notes at/above middle C go on the treble staff, the rest on bass.
+GRAND_STAFF_SPLIT_MIDI = 60
 
 # Instrument key -> (display label, music21 instrument class or None for
 # concert pitch, semitones from concert to written pitch). The offsets mirror
@@ -33,6 +49,7 @@ INSTRUMENTS: dict[str, dict[str, Any]] = {
     "piano": {"label": "Piano", "m21": instrument.Piano, "written_offset": 0},
     "flute": {"label": "Flute", "m21": instrument.Flute, "written_offset": 0},
     "violin": {"label": "Violin", "m21": instrument.Violin, "written_offset": 0},
+    "voice": {"label": "Voice / Vocals", "m21": instrument.Vocalist, "written_offset": 0},
     "alto_sax": {"label": "Alto Sax", "m21": instrument.AltoSaxophone, "written_offset": 9},
     "tenor_sax": {"label": "Tenor Sax", "m21": instrument.TenorSaxophone, "written_offset": 14},
     "trumpet": {"label": "Trumpet", "m21": instrument.Trumpet, "written_offset": 2},
@@ -83,37 +100,59 @@ def notes_to_musicxml(
     out_path: Path,
     style: str = "clean",
     chords: list[dict[str, Any]] | None = None,
+    rhythm_detail: str = "readable",
+    time_signature: str = "4/4",
+    key_signature: str | None = None,
+    arrangement_label: str | None = None,
 ) -> Path:
     """Write a MusicXML file for the given detected notes and instrument.
 
-    style="clean" (default) runs the notation cleanup pipeline (pitch
-    smoothing, merging, fragment removal, eighth-note quantization) and adds
-    an estimated key signature; style="raw" engraves the detection literally
-    on a sixteenth grid, exactly as v0.3 did.
+    style="clean" (default) runs the notation cleanup pipeline and adds a
+    key signature; style="raw" engraves the detection literally on a
+    sixteenth grid. Within clean, rhythm_detail="readable" (default) runs
+    the extra beginner-friendly rhythm pass; "precise" keeps the literal
+    eighth grid of the cleanup.
 
-    chords: optional manual chord markers ({"name", "start_time"}); they are
-    engraved as chord symbols above the staff (and transpose along with the
-    part for B-flat/E-flat instruments).
+    time_signature: "4/4" (default), "3/4" or "6/8". key_signature: one of
+    the Advanced Settings keys to force the signature, None to estimate it.
+    chords: manual chord markers, engraved as symbols above the (top) staff.
+    arrangement_label: appended to the title (e.g. "solo arrangement").
+
+    Piano gets a grand staff: two PartStaffs joined by a brace, split
+    around middle C, with rests filling whichever staff has no melody.
     """
     spec = INSTRUMENTS[instrument_key]
 
     cleaned = style == "clean"
     if cleaned:
         notes = clean_notes(notes)
+        if rhythm_detail != "precise":
+            notes = make_readable(notes)
         grid_ql = 0.5  # eighth-note grid, matching the cleanup quantization
     else:
         grid_ql = QUANT
 
-    part = stream.Part()
+    ts_string = time_signature if time_signature in VALID_TIME_SIGNATURES else "4/4"
+    ts = meter.TimeSignature(ts_string)
+    quarters_per_bar = ts.barDuration.quarterLength
+
+    grand = instrument_key == "piano"
+    if grand:
+        staves = [stream.PartStaff(), stream.PartStaff()]
+    else:
+        staves = [stream.Part()]
+    main_staff = staves[0]
+
     if spec["m21"] is not None:
         m21_inst = spec["m21"]()
     else:
         m21_inst = instrument.Instrument()
         m21_inst.instrumentName = "Concert pitch"
-    part.partName = spec["label"]
-    part.insert(0, m21_inst)
-    part.insert(0, meter.TimeSignature("4/4"))
-    part.insert(0, tempo.MetronomeMark(number=TEMPO_BPM))
+    main_staff.partName = spec["label"]
+    main_staff.insert(0, m21_inst)
+    for staff in staves:
+        staff.insert(0, meter.TimeSignature(ts_string))
+    main_staff.insert(0, tempo.MetronomeMark(number=TEMPO_BPM))
 
     # Notes are stored sorted by start time and (being monophonic) should not
     # overlap; clip any stragglers so the exporter never sees overlapping notes.
@@ -134,36 +173,75 @@ def notes_to_musicxml(
     for offset_ql, dur_ql, midi_pitch in placed:
         m21_note = note.Note(midi_pitch)
         m21_note.quarterLength = dur_ql
-        part.insert(offset_ql, m21_note)
+        if grand and midi_pitch < GRAND_STAFF_SPLIT_MIDI:
+            staves[1].insert(offset_ql, m21_note)
+        else:
+            staves[0].insert(offset_ql, m21_note)
 
-    # Cleaned scores get an estimated key signature so in-key notes engrave
-    # without per-note accidentals. Estimated at concert pitch; transposition
+    # BOTH grand-staff sides must span the same whole number of bars, or
+    # makeNotation gives them different measure counts — which misplaces
+    # chord symbols and draws a "final" barline mid-piece. Pad each staff
+    # with a trailing rest up to the common bar-aligned end (a side with no
+    # melody at all becomes one long rest); makeNotation splits it per bar.
+    if grand:
+        total_ql = max((o + d for o, d, _ in placed), default=quarters_per_bar)
+        total_ql = math.ceil(total_ql / quarters_per_bar - 1e-9) * quarters_per_bar
+        for staff in staves:
+            staff_end = max(
+                (n.offset + n.quarterLength
+                 for n in staff.recurse().getElementsByClass(note.Note)),
+                default=0.0,
+            )
+            if staff_end < total_ql - 1e-9:
+                rest = note.Rest()
+                rest.quarterLength = total_ql - staff_end
+                staff.insert(staff_end, rest)
+
+    # Cleaned scores get a key signature so in-key notes engrave without
+    # per-note accidentals — the user's Advanced Settings key when chosen,
+    # otherwise estimated from the melody. Concert pitch here; transposition
     # below moves the signature along with the notes.
     if cleaned and placed:
-        try:
-            analyzed = part.analyze("key")
-            part.insert(0, key.KeySignature(analyzed.sharps))
-        except Exception:
-            pass  # key estimation is best-effort; the score works without it
+        sharps: int | None = KEY_SHARPS.get(key_signature) if key_signature else None
+        if sharps is None:
+            try:
+                analysis_stream = stream.Stream()
+                for offset_ql, dur_ql, midi_pitch in placed:
+                    analysis_note = note.Note(midi_pitch)
+                    analysis_note.quarterLength = dur_ql
+                    analysis_stream.insert(offset_ql, analysis_note)
+                sharps = analysis_stream.analyze("key").sharps
+            except Exception:
+                sharps = None  # best-effort; the score works without it
+        if sharps is not None:
+            for staff in staves:
+                staff.insert(0, key.KeySignature(sharps))
 
     # Stored pitches are concert pitch; convert transposing instruments to
     # written pitch so MuseScore shows the part as a player would read it.
-    part.atSoundingPitch = True
+    # (Piano never transposes, so the grand staff never hits this.)
+    for staff in staves:
+        staff.atSoundingPitch = True
     if m21_inst.transposition is not None:
-        part.toWrittenPitch(inPlace=True)
+        main_staff.toWrittenPitch(inPlace=True)
 
     if cleaned:
-        written_ks = part.recurse().getElementsByClass(key.KeySignature).first()
-        _respell_for_key(part, written_ks.sharps if written_ks is not None else 0)
+        written_ks = main_staff.recurse().getElementsByClass(key.KeySignature).first()
+        for staff in staves:
+            _respell_for_key(staff, written_ks.sharps if written_ks is not None else 0)
 
-    part.insert(0, clef.bestClef(part, recurse=True))
+    if grand:
+        staves[0].insert(0, clef.TrebleClef())
+        staves[1].insert(0, clef.BassClef())
+    else:
+        main_staff.insert(0, clef.bestClef(main_staff, recurse=True))
 
-    # Manual chord markers become chord symbols above the staff. Inserted
-    # AFTER key analysis / respelling / clef choice so an added chord never
-    # changes how the melody itself engraves; transposing instruments get
-    # the symbols transposed to written pitch by hand (toWrittenPitch has
-    # already run). Unparseable names are skipped rather than failing the
-    # export — they still appear in the JSON and the chord chart.
+    # Manual chord markers become chord symbols above the (top) staff.
+    # Inserted AFTER key analysis / respelling / clef choice so an added
+    # chord never changes how the melody itself engraves; transposing
+    # instruments get the symbols transposed to written pitch by hand
+    # (toWrittenPitch has already run). Unparseable names are skipped rather
+    # than failing the export — they still appear in JSON and the chart.
     for chord_marker in chords or []:
         try:
             symbol = harmony.ChordSymbol(m21_chord_figure(chord_marker["name"]))
@@ -174,15 +252,20 @@ def notes_to_musicxml(
         offset_ql = max(
             0.0, _quantize(chord_marker["start_time"] / SECONDS_PER_QUARTER, grid_ql)
         )
-        part.insert(offset_ql, symbol)
+        main_staff.insert(offset_ql, symbol)
 
     title = f"{project_name} — {spec['label']}"
+    if arrangement_label:
+        title += f" ({arrangement_label})"
     if not cleaned:
         title += " (raw transcription)"
 
     score = stream.Score()
     score.metadata = metadata.Metadata(title=title)
-    score.insert(0, part)
+    for staff in staves:
+        score.insert(0, staff)
+    if grand:
+        score.insert(0, layout.StaffGroup(staves, symbol="brace"))
     score.makeNotation(inPlace=True)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
