@@ -2,7 +2,7 @@
 
 AI music arranging and rehearsal app that turns songs into editable lead sheets, solo sheets, band charts and custom arrangements.
 
-## v0.6 — Transcription + Solo Parts + Sheet Music + Play Along + Editing + YouTube Import
+## v0.7 — Transcription + Solo Parts + Sheet Music + Play Along + Editing + YouTube Import + Tab
 
 This is the smallest possible working prototype: a local web app where you upload an audio
 file and the backend runs **real audio-to-pitch transcription** using
@@ -26,8 +26,17 @@ environments with newer Python versions.
 - Generate a MIDI file and a JSON file listing every detected note (pitch, start time, duration, confidence)
 - Preview the transcription in the browser (simple piano-roll + note table)
 - Pick a solo instrument (concert pitch, piano, flute, violin, alto sax, tenor sax, trumpet,
-  clarinet) — the note table shows both the detected concert pitch and the written pitch,
-  transposed for E♭/B♭ instruments
+  clarinet, guitar, bass, ukulele) — the note table shows both the detected concert pitch
+  and the written pitch, transposed for E♭/B♭ instruments
+- **Tablature for guitar, bass and ukulele** (v0.7): picking one of the fretted
+  instruments swaps the sheet-music view for a plain text-style **tab preview** —
+  string lines with fret numbers in standard tuning, built from the same detected
+  melody. A **Download TAB** button saves it as a `.txt` file. Frets 0–12 are
+  preferred; if the melody sits outside the instrument's range it is shifted by whole
+  octaves to fit (with a clear note saying so), and any note that still can't be
+  played is marked `x` and listed in a warning instead of crashing. During Play
+  Along the current tab column is highlighted, and deleting notes updates the tab
+  like every other output
 - Download MIDI, JSON, MusicXML (sheet music that opens in
   [MuseScore](https://musescore.org) and similar apps), and **PDF sheet music** — all
   written for the chosen instrument
@@ -55,7 +64,8 @@ environments with newer Python versions.
   project with its uploaded audio and generated files, after a confirmation prompt
 
 **Explicitly out of scope so far:** accounts, payments, full band charts, rehearsal packs,
-PDF export, YouTube support, complex editing, stem separation, drums, chord detection.
+complex editing, stem separation, drums, chord detection, full guitar/bass extraction from
+mixed songs (tab comes from the single detected melody line).
 
 ---
 
@@ -254,6 +264,37 @@ contain the untouched detection regardless of the style toggle.
    here, it will also be wrong in the sheet music, which makes this a quick way to check a
    transcription by ear
 
+### Guitar, bass and ukulele tab (beginner steps)
+
+v0.7 adds simple text-style tablature for the three fretted instruments. It's built from
+the **same single detected melody line** as everything else — this is still monophonic
+melody transcription, **not** full guitar chord transcription and not band/bass-line
+extraction from a mixed song. One note at a time, shown as fret numbers instead of staff
+notation.
+
+**How it works:**
+- Pick **Guitar**, **Bass** or **Ukulele** in the Solo instrument dropdown. The
+  sheet-music panel is replaced by a **Tab output** panel: six lines for guitar
+  (standard tuning E2 A2 D3 G3 B3 E4), four for bass (E1 A1 D2 G2) and four for ukulele
+  (G4 C4 E4 A4, high G). Each column is one detected note, in playing order, with a bar
+  line at each new measure (at the app's fixed 120 BPM grid)
+- Each note is placed on one string, preferring low frets (0–12) for easy playing
+- If the melody doesn't fit the instrument's range (very common for bass, which is a low
+  instrument), the whole melody is shifted up or down by whole octaves to fit — a yellow
+  note above the tab tells you when this happened. Any note that *still* can't be played
+  is shown as `x` in the tab and listed in the warning — nothing crashes
+- **Download TAB** (only visible for the three fretted instruments) saves the tab as a
+  plain `.txt` file you can open, print or paste anywhere
+- Play Along works exactly as before, and the current tab column lights up orange as it
+  plays. Deleting a note updates the tab preview and the TAB download too
+- The MusicXML and PDF downloads still work for these instruments, but they use **staff
+  notation** for now — a proper engraved tab PDF is planned for later
+
+**How to test it:** transcribe any short melody, select **Guitar** — the tab preview and
+the **Download TAB** button appear. Switch to **Bass** — expect the yellow octave-shift
+note on most melodies. Switch to **Ukulele**, then back to **Piano** — the sheet music
+view returns. Delete a note in the note table and watch the tab column disappear.
+
 ### Fixing wrong notes (beginner steps)
 
 1. In the **Note detail** table, find the wrongly detected note (playing along and watching
@@ -384,8 +425,13 @@ All endpoints are under `/api`.
 | GET | `/projects/{id}/audio` | Stream the original uploaded audio |
 | GET | `/projects/{id}/download/midi` | Download the generated MIDI file |
 | GET | `/projects/{id}/download/json` | Download the generated notes JSON file |
-| GET | `/projects/{id}/download/musicxml?instrument=<key>&style=<clean\|raw>` | Download MusicXML for a solo instrument — instrument keys: `concert`, `piano`, `flute`, `violin`, `alto_sax`, `tenor_sax`, `trumpet`, `clarinet`; style defaults to `clean` |
+| GET | `/projects/{id}/download/musicxml?instrument=<key>&style=<clean\|raw>` | Download MusicXML for a solo instrument — instrument keys: `concert`, `piano`, `flute`, `violin`, `alto_sax`, `tenor_sax`, `trumpet`, `clarinet`, `guitar`, `bass`, `ukulele`; style defaults to `clean` (staff notation for all keys, including the fretted ones) |
 | GET | `/projects/{id}/download/pdf?instrument=<key>&style=<clean\|raw>` | Download PDF sheet music (same parameters) |
+| GET | `/projects/{id}/tab?instrument=<guitar\|bass\|ukulele>` | Tab layout as JSON (entries, warnings, preview grid) for the in-app tab preview |
+| GET | `/projects/{id}/download/tab?instrument=<guitar\|bass\|ukulele>` | Download the tab as a plain `.txt` file |
+| PUT | `/projects/{id}/notes` | Save an edited note list (rewrites JSON + MIDI) |
+| POST | `/projects/{id}/notes/reset` | Restore the original transcription |
+| DELETE | `/projects/{id}` | Delete a project and all its files |
 
 Each note in the JSON output has: `pitch` (MIDI number), `pitch_name` (e.g. `"C4"`),
 `start_time` (seconds), `duration` (seconds), and `confidence` (0–1, pYIN's voiced-pitch

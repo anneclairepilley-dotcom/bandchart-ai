@@ -209,6 +209,57 @@ export function musicxmlDownloadUrl(
   return `${API_BASE_URL}/api/projects/${projectId}/download/musicxml?instrument=${encodeURIComponent(instrumentKey)}&style=${style}`;
 }
 
+/** One cell of the tab preview grid; `i` is the note index it belongs to. */
+export interface TabCell {
+  t: string;
+  i: number | null;
+}
+
+export interface TabEntry {
+  note_index: number;
+  pitch_name: string;
+  start_time: number;
+  string: number;
+  fret: number | null;
+  out_of_range: boolean;
+}
+
+export interface TabData {
+  instrument: string;
+  label: string;
+  tuning: string;
+  string_names: string[];
+  octave_offset: number;
+  note_count: number;
+  entries: TabEntry[];
+  warnings: string[];
+  /** systems -> lines (one per string) -> cells. */
+  systems: TabCell[][][];
+  text: string;
+}
+
+/**
+ * Fetch the text-tab layout for a fretted instrument (guitar/bass/ukulele).
+ * Built from the current saved notes, so it reflects note edits once the
+ * auto-save has run.
+ */
+export function fetchTab(
+  projectId: string,
+  instrumentKey: string
+): Promise<TabData> {
+  return request<TabData>(
+    `/api/projects/${projectId}/tab?instrument=${encodeURIComponent(instrumentKey)}`
+  );
+}
+
+/** Direct URL for downloading the tab as a .txt file. */
+export function tabDownloadUrl(
+  projectId: string,
+  instrumentKey: string
+): string {
+  return `${API_BASE_URL}/api/projects/${projectId}/download/tab?instrument=${encodeURIComponent(instrumentKey)}`;
+}
+
 /**
  * Fetch the PDF sheet music for a solo instrument as a Blob.
  *

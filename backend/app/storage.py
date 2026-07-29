@@ -78,6 +78,10 @@ def pdf_path(project_id: str, instrument_key: str, style: str = "clean") -> Path
     return output_dir(project_id) / f"{_sheet_stem(instrument_key, style)}.pdf"
 
 
+def tab_path(project_id: str, instrument_key: str) -> Path:
+    return output_dir(project_id) / f"transcription-{instrument_key.replace('_', '-')}-tab.txt"
+
+
 def project_exists(project_id: str) -> bool:
     return project_json_path(project_id).exists()
 

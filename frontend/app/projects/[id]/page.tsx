@@ -14,6 +14,7 @@ import {
   midiDownloadUrl,
   musicxmlDownloadUrl,
   resetNotes,
+  tabDownloadUrl,
   transcribeProject,
   updateNotes,
   uploadAudio,
@@ -26,6 +27,7 @@ import StatusBadge from "@/components/StatusBadge";
 import NotePreview from "@/components/NotePreview";
 import PlayAlong from "@/components/PlayAlong";
 import SheetMusic from "@/components/SheetMusic";
+import TabView from "@/components/TabView";
 import type { Note } from "@/lib/api";
 
 // Memoized so the 60fps play-along position updates don't re-render every
@@ -815,9 +817,11 @@ export default function ProjectDetailPage() {
               ))}
             </select>
             <p className="mt-2 text-xs text-gray-500">
-              {selectedInstrument.writtenOffset > 0
-                ? `${selectedInstrument.label} is a transposing instrument — its written part is ${selectedInstrument.writtenOffset} semitones above the detected concert pitch. The note table and MusicXML download below use the written pitch.`
-                : "This instrument reads at concert pitch, so written and detected pitches are the same."}
+              {selectedInstrument.fretted
+                ? `${selectedInstrument.label} shows tab output below — string lines with fret numbers, in ${selectedInstrument.tuning} tuning. Notes that don't fit the instrument's range are flagged clearly.`
+                : selectedInstrument.writtenOffset > 0
+                  ? `${selectedInstrument.label} is a transposing instrument — its written part is ${selectedInstrument.writtenOffset} semitones above the detected concert pitch. The note table and MusicXML download below use the written pitch.`
+                  : "This instrument reads at concert pitch, so written and detected pitches are the same."}
             </p>
 
             <fieldset className="mt-4">
@@ -872,6 +876,16 @@ export default function ProjectDetailPage() {
             >
               Download MusicXML ({selectedInstrument.label})
             </a>
+            {selectedInstrument.fretted && (
+              <a
+                href={tabDownloadUrl(projectId, instrumentKey)}
+                download
+                data-testid="download-tab"
+                className="rounded border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-50"
+              >
+                Download TAB ({selectedInstrument.label})
+              </a>
+            )}
             <button
               type="button"
               onClick={handlePdfDownload}
@@ -890,6 +904,15 @@ export default function ProjectDetailPage() {
             </button>
             {startAgainButton}
           </div>
+
+          {selectedInstrument.fretted && (
+            <p className="text-xs text-gray-500">
+              For {selectedInstrument.label.toLowerCase()}, the MusicXML and
+              PDF downloads still use staff notation — a proper tab PDF is
+              coming in a later version. The TAB download is a plain text
+              file you can open anywhere.
+            </p>
+          )}
 
           {pdfError && (
             <p className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
@@ -928,17 +951,30 @@ export default function ProjectDetailPage() {
                 onAutoScrollChange={setAutoScroll}
               />
 
-              <div>
-                <h2 className="mb-2 text-lg font-medium">Sheet music</h2>
-                <SheetMusic
-                  projectId={projectId}
-                  instrumentKey={instrumentKey}
-                  sheetStyle={sheetStyle}
-                  notesVersion={notesVersion}
-                  playPosition={playPosition}
-                  autoScroll={autoScroll}
-                />
-              </div>
+              {selectedInstrument.fretted ? (
+                <div>
+                  <h2 className="mb-2 text-lg font-medium">Tab output</h2>
+                  <TabView
+                    projectId={projectId}
+                    instrumentKey={instrumentKey}
+                    notesVersion={notesVersion}
+                    currentNoteIndex={playNoteIndex}
+                    autoScroll={autoScroll}
+                  />
+                </div>
+              ) : (
+                <div>
+                  <h2 className="mb-2 text-lg font-medium">Sheet music</h2>
+                  <SheetMusic
+                    projectId={projectId}
+                    instrumentKey={instrumentKey}
+                    sheetStyle={sheetStyle}
+                    notesVersion={notesVersion}
+                    playPosition={playPosition}
+                    autoScroll={autoScroll}
+                  />
+                </div>
+              )}
 
               <details className="rounded border border-gray-200 p-3">
                 <summary className="cursor-pointer text-sm font-medium text-gray-700">
