@@ -30,6 +30,7 @@ class Project(BaseModel):
     time_signature: Optional[str] = None  # "predict" | "4/4" | "3/4" | "6/8"
     key_signature: Optional[str] = None  # "predict" | "C" | "G" | ... | "Dm"
     rhythm_detail: Optional[str] = None  # "readable" | "precise"
+    note_detection: Optional[str] = None  # "melody" | "poly" (v0.9.2)
 
 
 class ProjectCreate(BaseModel):
@@ -78,6 +79,7 @@ class ProjectSettings(BaseModel):
     time_signature: str = "predict"
     key_signature: str = "predict"
     rhythm_detail: str = "readable"
+    note_detection: str = "melody"
 
 
 class TranscriptionResult(BaseModel):

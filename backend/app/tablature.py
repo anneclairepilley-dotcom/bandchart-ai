@@ -113,7 +113,28 @@ def build_tab(
     strings = spec["strings"]
     label = spec["label"]
 
-    pitches = [int(n["pitch"]) for n in notes]
+    # Tab stays melody-first (v0.9.2): when several notes share the same
+    # start time (polyphonic transcriptions), only the highest — the
+    # melody note — goes on the tab. Original indexes are kept so the
+    # play-along highlight still lines up with the full note list.
+    keep_indexes: set[int] = set()
+    dropped_chord_members = 0
+    i = 0
+    while i < len(notes):
+        j = i
+        best = i
+        while (
+            j < len(notes)
+            and abs(notes[j]["start_time"] - notes[i]["start_time"]) < 1e-6
+        ):
+            if notes[j]["pitch"] > notes[best]["pitch"]:
+                best = j
+            j += 1
+        keep_indexes.add(best)
+        dropped_chord_members += (j - i) - 1
+        i = j
+
+    pitches = [int(n["pitch"]) for idx, n in enumerate(notes) if idx in keep_indexes]
     offset = _best_octave_offset(pitches, strings) if pitches else 0
 
     # Display order puts high strings first, but reentrant tunings (ukulele's
@@ -124,6 +145,8 @@ def build_tab(
     entries: list[dict[str, Any]] = []
     unplayable: list[str] = []
     for index, note in enumerate(notes):
+        if index not in keep_indexes:
+            continue  # chord member below the melody note — not on the tab
         shifted = int(note["pitch"]) + offset
         hit = _fret_for(shifted, strings)
         if hit is None:
@@ -157,6 +180,11 @@ def build_tab(
             )
 
     warnings: list[str] = []
+    if dropped_chord_members > 0:
+        warnings.append(
+            "Chords were detected in the transcription — the tab shows the "
+            "top (melody) note of each chord for now."
+        )
     if entries and offset != 0:
         octaves = abs(offset) // 12
         direction = "down" if offset < 0 else "up"

@@ -12,6 +12,8 @@ interface SheetMusicProps {
   notesVersion: number;
   /** Play-along transport position in seconds; null when stopped. */
   playPosition: number | null;
+  /** Called with a time in seconds when the user clicks the sheet (v0.9.2). */
+  onSeek?: (positionSeconds: number) => void;
   autoScroll: boolean;
 }
 
@@ -47,6 +49,7 @@ export default function SheetMusic({
   sheetStyle,
   notesVersion,
   playPosition,
+  onSeek,
   autoScroll,
 }: SheetMusicProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -99,6 +102,10 @@ export default function SheetMusic({
           drawComposer: false,
           drawCredits: false,
           drawPartNames: true,
+          // v0.9.2: bar numbers only at the start of each system, sitting
+          // cleanly above the (top) staff instead of floating mid-score.
+          drawMeasureNumbers: true,
+          drawMeasureNumbersOnlyAtSystemStart: true,
           // Cursor 0: a soft blue wash over the current measure (visible).
           // Cursor 1: an INVISIBLE note-box cursor (alpha 0) used only to
           // measure each entry's x/y position at load time — the visible
@@ -252,9 +259,43 @@ export default function SheetMusic({
     }
   }, [playPosition, autoScroll, loadState]);
 
+  /** Click on the sheet -> seek to the nearest note entry (v0.9.2). */
+  function handleSheetClick(event: React.MouseEvent<HTMLDivElement>) {
+    if (!onSeek) return;
+    const entries = entriesRef.current;
+    if (entries.length === 0) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const clickX = event.clientX - rect.left;
+    const clickY = event.clientY - rect.top;
+
+    // Entry tops vary by a few pixels within one system (the note-box
+    // sits at the note's height), so pick the vertically-nearest entry
+    // first, then treat everything within ~100px of its top as the same
+    // system band and take the horizontally closest entry in that band.
+    let anchor = entries[0];
+    let bestDist = Infinity;
+    for (const entry of entries) {
+      const dist = Math.abs(entry.top + entry.height / 2 - clickY);
+      if (dist < bestDist) {
+        bestDist = dist;
+        anchor = entry;
+      }
+    }
+    const band = entries.filter(
+      (entry) => Math.abs(entry.top - anchor.top) < 100
+    );
+    let best = band[0];
+    for (const entry of band) {
+      if (Math.abs(entry.x - clickX) < Math.abs(best.x - clickX)) {
+        best = entry;
+      }
+    }
+    onSeek(best.time);
+  }
+
   if (loadState === "error") {
     return (
-      <p className="rounded border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800">
+      <p className="rounded border border-yellow-300 bg-yellow-50 p-3 text-sm text-yellow-900">
         Couldn&apos;t display the sheet music preview ({errorDetail}). The
         piano-roll preview above still follows playback, and the MusicXML/PDF
         downloads work independently of this viewer.
@@ -265,14 +306,19 @@ export default function SheetMusic({
   return (
     <div>
       {loadState === "loading" && (
-        <p className="mb-2 text-sm text-gray-500">Rendering sheet music…</p>
+        <p className="mb-2 text-sm text-gray-600">Rendering sheet music…</p>
       )}
       <div
         ref={scrollBoxRef}
-        className="max-h-[600px] overflow-y-auto rounded border border-gray-200 bg-white p-2"
+        className="max-h-[600px] overflow-y-auto rounded border border-gray-400 bg-white p-2"
         data-testid="sheet-scrollbox"
       >
-        <div className="relative">
+        <div
+          className={`relative ${onSeek ? "cursor-pointer" : ""}`}
+          onClick={handleSheetClick}
+          title={onSeek ? "Click to move the playhead here" : undefined}
+          data-testid="sheet-clickarea"
+        >
           <div ref={containerRef} />
           <div
             ref={playheadRef}
@@ -282,11 +328,11 @@ export default function SheetMusic({
           />
         </div>
       </div>
-      <p className="mt-1 text-xs text-gray-500">
-        The blue line is the playhead — it glides through the notes as they
-        play, and the light blue wash marks the current bar. It follows the
-        sheet&apos;s beat grid, so it can sit slightly off the literal
-        recording timing.
+      <p className="mt-1 text-xs text-gray-600">
+        The blue line is the playhead — <span className="font-medium">click
+        anywhere on the sheet to move it</span> (playback follows). It glides
+        through the notes on the sheet&apos;s beat grid, with the light blue
+        wash marking the current bar.
       </p>
     </div>
   );

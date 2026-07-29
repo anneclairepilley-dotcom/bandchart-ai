@@ -80,6 +80,7 @@ const NoteTable = memo(function NoteTable({
   autoScroll,
   onDelete,
   onEdit,
+  onSeekNote,
 }: {
   notes: Note[];
   writtenLabel: string;
@@ -92,6 +93,8 @@ const NoteTable = memo(function NoteTable({
     field: "pitch" | "start_time" | "duration",
     raw: string
   ) => void;
+  /** Row click (not on an input/button) moves the playhead to that note. */
+  onSeekNote: (index: number) => void;
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
 
@@ -114,7 +117,7 @@ const NoteTable = memo(function NoteTable({
   }, [currentIndex, autoScroll]);
 
   return (
-    <div ref={boxRef} className="max-h-96 overflow-y-auto rounded border border-gray-200">
+    <div ref={boxRef} className="max-h-96 overflow-y-auto rounded border border-gray-300">
       <table className="w-full text-left text-sm">
         <thead className="sticky top-0 bg-gray-50">
           <tr>
@@ -135,11 +138,17 @@ const NoteTable = memo(function NoteTable({
               // whenever a note actually changes (edit commit, reset).
               key={`${note.start_time}-${note.pitch}-${note.duration}-${i}`}
               data-playing={i === currentIndex ? "true" : undefined}
-              className={
+              onClick={(e) => {
+                // Inputs and the delete button keep their own behaviour.
+                if ((e.target as HTMLElement).closest("input,button")) return;
+                onSeekNote(i);
+              }}
+              title="Click the row to move the playhead to this note"
+              className={`cursor-pointer ${
                 i === currentIndex
                   ? "border-t border-orange-200 bg-orange-100"
                   : "border-t border-gray-100 odd:bg-white even:bg-gray-50"
-              }
+              }`}
             >
               <td className="p-2">
                 <input
@@ -151,7 +160,7 @@ const NoteTable = memo(function NoteTable({
                   }}
                   data-testid={`pitch-input-${i}`}
                   aria-label={`Pitch of note ${i + 1}`}
-                  className="w-16 rounded border border-gray-300 px-2 py-1 text-sm"
+                  className="w-16 rounded border border-gray-400 px-2 py-1 text-sm"
                 />
               </td>
               <td className="p-2">{midiNoteName(note.pitch + writtenOffset)}</td>
@@ -167,7 +176,7 @@ const NoteTable = memo(function NoteTable({
                   }}
                   data-testid={`start-input-${i}`}
                   aria-label={`Start time of note ${i + 1}`}
-                  className="w-24 rounded border border-gray-300 px-2 py-1 text-sm"
+                  className="w-24 rounded border border-gray-400 px-2 py-1 text-sm"
                 />
               </td>
               <td className="p-2">
@@ -182,7 +191,7 @@ const NoteTable = memo(function NoteTable({
                   }}
                   data-testid={`duration-input-${i}`}
                   aria-label={`Duration of note ${i + 1}`}
-                  className="w-24 rounded border border-gray-300 px-2 py-1 text-sm"
+                  className="w-24 rounded border border-gray-400 px-2 py-1 text-sm"
                 />
               </td>
               <td className="p-2">{(note.confidence * 100).toFixed(0)}%</td>
@@ -308,6 +317,25 @@ export default function ProjectDetailPage() {
   // Guards Start transcription while the settings save is in flight (the
   // transcribing flag only flips once the transcription request starts).
   const [startBusy, setStartBusy] = useState(false);
+  // v0.9.2: melody-only vs experimental multiple-note detection. Follows
+  // the piano+direct default until the user touches the control.
+  const [setupDetection, setSetupDetection] = useState<"melody" | "poly">(
+    "melody"
+  );
+  const detectionTouchedRef = useRef(false);
+
+  // v0.9.2 click-to-seek: PlayAlong registers its seek function here and
+  // the sheet / timeline / tab / note table call it.
+  const seekRef = useRef<((positionSeconds: number) => void) | null>(null);
+  const registerSeek = useCallback(
+    (seek: (positionSeconds: number) => void) => {
+      seekRef.current = seek;
+    },
+    []
+  );
+  const handleSeek = useCallback((positionSeconds: number) => {
+    seekRef.current?.(positionSeconds);
+  }, []);
 
   const [sheetStyle, setSheetStyle] = useState<SheetStyle>("clean");
 
@@ -330,6 +358,13 @@ export default function ProjectDetailPage() {
   // JSON + MIDI so every download reflects the edit; notesVersion bumps make
   // the sheet-music viewer re-fetch.
   const [workingNotes, setWorkingNotes] = useState<Note[] | null>(null);
+  const handleSeekNote = useCallback(
+    (index: number) => {
+      const target = workingNotes?.[index];
+      if (target) seekRef.current?.(target.start_time);
+    },
+    [workingNotes]
+  );
   const [notesVersion, setNotesVersion] = useState(0);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -683,6 +718,10 @@ export default function ProjectDetailPage() {
           if (data.time_signature) setSetupTs(data.time_signature);
           if (data.key_signature) setSetupKey(data.key_signature);
           if (data.rhythm_detail === "precise") setSetupRhythm("precise");
+          if (data.note_detection === "poly" || data.note_detection === "melody") {
+            setSetupDetection(data.note_detection);
+            detectionTouchedRef.current = true;
+          }
         }
       })
       .catch((err: unknown) => {
@@ -822,6 +861,7 @@ export default function ProjectDetailPage() {
         time_signature: setupTs,
         key_signature: setupKey,
         rhythm_detail: setupRhythm,
+        note_detection: setupDetection,
       });
       setProject(updated);
       setInstrumentKey(setupInstrument);
@@ -923,7 +963,7 @@ export default function ProjectDetailPage() {
   const sourceBusy = uploading || ytImporting;
 
   const uploadForm = (
-    <section className="rounded border border-gray-200 p-4">
+    <section className="rounded border border-gray-300 p-4">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-lg font-medium">
           {replacingAudio ? "Replace the audio" : "Add audio"}
@@ -938,7 +978,7 @@ export default function ProjectDetailPage() {
               setFile(null);
             }}
             disabled={sourceBusy}
-            className="text-sm text-gray-500 hover:underline disabled:opacity-50"
+            className="text-sm text-gray-600 hover:underline disabled:opacity-50"
           >
             Cancel
           </button>
@@ -954,7 +994,7 @@ export default function ProjectDetailPage() {
           className={`rounded px-3 py-1.5 text-sm font-medium ${
             sourceMode === "file"
               ? "bg-blue-600 text-white"
-              : "border border-gray-300 hover:bg-gray-50"
+              : "border border-gray-400 hover:bg-gray-50"
           }`}
         >
           Upload audio file
@@ -967,7 +1007,7 @@ export default function ProjectDetailPage() {
           className={`rounded px-3 py-1.5 text-sm font-medium ${
             sourceMode === "youtube"
               ? "bg-blue-600 text-white"
-              : "border border-gray-300 hover:bg-gray-50"
+              : "border border-gray-400 hover:bg-gray-50"
           }`}
         >
           Import from YouTube
@@ -1006,7 +1046,7 @@ export default function ProjectDetailPage() {
             </button>
           </form>
           {uploading && (
-            <p className="mt-2 text-sm text-gray-500">
+            <p className="mt-2 text-sm text-gray-600">
               Sending {file?.name} to the server — large files can take a moment.
             </p>
           )}
@@ -1030,7 +1070,7 @@ export default function ProjectDetailPage() {
             placeholder="https://www.youtube.com/watch?v=…"
             disabled={ytImporting}
             data-testid="yt-url"
-            className="rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+            className="rounded border border-gray-400 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
           />
           <label className="flex items-start gap-2 text-sm text-gray-700">
             <input
@@ -1046,7 +1086,7 @@ export default function ProjectDetailPage() {
               for private transcription/arrangement use.
             </span>
           </label>
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-gray-600">
             BandChart AI does not publish, share or create a public library
             from your transcription.
           </p>
@@ -1066,7 +1106,7 @@ export default function ProjectDetailPage() {
             {ytImporting ? "Importing…" : "Import YouTube audio"}
           </button>
           {ytImporting && (
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-gray-600">
               Importing from YouTube — checking the link, extracting the audio
               and converting it to WAV… this can take a minute for longer
               clips. When it&apos;s done you&apos;ll choose your instrument
@@ -1086,11 +1126,11 @@ export default function ProjectDetailPage() {
               </button>
             </div>
           )}
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-gray-600">
             If YouTube blocks import, download or record the audio yourself
             and use Upload audio file instead.
           </p>
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-gray-600">
             YouTube import uses the same monophonic transcription engine. It
             works best on clear single melody lines, not full band mixes.
             Videos longer than 10 minutes are rejected for now — short clips
@@ -1122,7 +1162,7 @@ export default function ProjectDetailPage() {
         setReplacingAudio(true);
         setUploadError(null);
       }}
-      className="w-fit rounded border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-50"
+      className="w-fit rounded border border-gray-400 px-4 py-2 text-sm font-medium hover:bg-gray-50"
     >
       Start again with a different file
     </button>
@@ -1144,7 +1184,7 @@ export default function ProjectDetailPage() {
   if (!project) {
     return (
       <main className="mx-auto max-w-2xl p-6">
-        <p className="text-sm text-gray-500">Loading project…</p>
+        <p className="text-sm text-gray-600">Loading project…</p>
       </main>
     );
   }
@@ -1160,7 +1200,7 @@ export default function ProjectDetailPage() {
       <header className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold">{project.name}</h1>
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-gray-600">
             Created {new Date(project.created_at).toLocaleString()}
           </p>
         </div>
@@ -1170,10 +1210,10 @@ export default function ProjectDetailPage() {
       {showUploadForm && uploadForm}
 
       {project.status === "uploaded" && !replacingAudio && (
-        <section className="rounded border border-gray-200 p-4">
+        <section className="rounded border border-gray-300 p-4">
           <h2 className="mb-1 text-lg font-medium">Set up your sheet music</h2>
           {project.audio_filename && (
-            <p className="mb-3 text-xs text-gray-500">
+            <p className="mb-3 text-xs text-gray-600">
               {project.source_type === "youtube" && project.source_url
                 ? `Imported from YouTube: ${project.source_url}`
                 : `File: ${project.audio_filename}`}
@@ -1195,22 +1235,30 @@ export default function ProjectDetailPage() {
                   onClick={() => {
                     setSetupInstrument(inst.key);
                     setSetupError(null);
+                    if (!detectionTouchedRef.current) {
+                      setSetupDetection(
+                        inst.key === "piano" &&
+                          setupMode === "direct_transcription"
+                          ? "poly"
+                          : "melody"
+                      );
+                    }
                   }}
                   data-testid={`pick-${inst.key}`}
                   className={`rounded border px-3 py-2 text-left text-sm ${
                     setupInstrument === inst.key
                       ? "border-blue-600 bg-blue-50 font-medium text-blue-900"
-                      : "border-gray-300 hover:bg-gray-50"
+                      : "border-gray-400 hover:bg-gray-50"
                   }`}
                 >
                   {inst.label}
                   {inst.fretted && (
-                    <span className="block text-[11px] font-normal text-gray-500">
+                    <span className="block text-[11px] font-normal text-gray-600">
                       shows TAB
                     </span>
                   )}
                   {inst.key === "piano" && (
-                    <span className="block text-[11px] font-normal text-gray-500">
+                    <span className="block text-[11px] font-normal text-gray-600">
                       grand staff
                     </span>
                   )}
@@ -1231,12 +1279,20 @@ export default function ProjectDetailPage() {
                   onClick={() => {
                     setSetupMode(mode.key);
                     setSetupError(null);
+                    if (!detectionTouchedRef.current) {
+                      setSetupDetection(
+                        setupInstrument === "piano" &&
+                          mode.key === "direct_transcription"
+                          ? "poly"
+                          : "melody"
+                      );
+                    }
                   }}
                   data-testid={`mode-${mode.key === "direct_transcription" ? "direct" : "solo"}`}
                   className={`rounded border px-3 py-2 text-left ${
                     setupMode === mode.key
                       ? "border-blue-600 bg-blue-50"
-                      : "border-gray-300 hover:bg-gray-50"
+                      : "border-gray-400 hover:bg-gray-50"
                   }`}
                 >
                   <span className="block text-sm font-medium">
@@ -1248,12 +1304,12 @@ export default function ProjectDetailPage() {
                 </button>
               ))}
             </div>
-            <p className="mt-1 text-xs text-gray-500">
+            <p className="mt-1 text-xs text-gray-600">
               BandChart is melody-first. Full band separation is coming later.
             </p>
           </div>
 
-          <details className="mt-5 rounded border border-gray-200 p-3">
+          <details className="mt-5 rounded border border-gray-300 p-3">
             <summary className="cursor-pointer text-sm font-semibold">
               3. Advanced settings (optional)
             </summary>
@@ -1264,7 +1320,7 @@ export default function ProjectDetailPage() {
                   value={setupTs}
                   onChange={(e) => setSetupTs(e.target.value)}
                   data-testid="setup-ts"
-                  className="rounded border border-gray-300 px-2 py-1"
+                  className="rounded border border-gray-400 px-2 py-1"
                 >
                   {TIME_SIGNATURE_OPTIONS.map((ts) => (
                     <option key={ts} value={ts}>
@@ -1281,7 +1337,7 @@ export default function ProjectDetailPage() {
                   value={setupKey}
                   onChange={(e) => setSetupKey(e.target.value)}
                   data-testid="setup-key"
-                  className="rounded border border-gray-300 px-2 py-1"
+                  className="rounded border border-gray-400 px-2 py-1"
                 >
                   {KEY_OPTIONS.map((k) => (
                     <option key={k} value={k}>
@@ -1314,6 +1370,42 @@ export default function ProjectDetailPage() {
                     Precise — closer to the detected timings
                   </label>
                 </div>
+              </fieldset>
+              <fieldset>
+                <legend className="mb-1 text-gray-700">Note detection</legend>
+                <div className="flex flex-col gap-1">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="noteDetection"
+                      checked={setupDetection === "melody"}
+                      onChange={() => {
+                        detectionTouchedRef.current = true;
+                        setSetupDetection("melody");
+                      }}
+                      data-testid="detection-melody"
+                    />
+                    Melody only (recommended for most instruments)
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="noteDetection"
+                      checked={setupDetection === "poly"}
+                      onChange={() => {
+                        detectionTouchedRef.current = true;
+                        setSetupDetection("poly");
+                      }}
+                      data-testid="detection-poly"
+                    />
+                    Allow simple chords / multiple notes (experimental)
+                  </label>
+                </div>
+                <p className="mt-1 text-xs text-gray-600">
+                  Multiple-note detection is experimental and works best with
+                  clear piano or simple chords. Piano + Direct transcription
+                  turns it on automatically.
+                </p>
               </fieldset>
             </div>
           </details>
@@ -1399,19 +1491,36 @@ export default function ProjectDetailPage() {
               Your browser does not support the audio element.
             </audio>
             {project.source_type === "youtube" && project.source_url && (
-              <p className="mt-1 text-xs text-gray-500">
+              <p className="mt-1 text-xs text-gray-600">
                 Imported from YouTube: {project.source_url}
               </p>
             )}
             {project.mode === "solo_arrangement" && (
-              <p className="mt-1 text-xs text-gray-600" data-testid="solo-badge">
+              <p className="mt-1 text-xs text-gray-700" data-testid="solo-badge">
                 Solo arrangement — the main melody arranged as a playable solo
                 for your instrument (melody-first).
               </p>
             )}
+            {notes?.detection === "poly" && (
+              <p
+                className="mt-2 rounded border border-blue-200 bg-blue-50 p-2 text-xs text-blue-900"
+                data-testid="poly-note"
+              >
+                Multiple-note detection is experimental and works best with
+                clear piano or simple chords.
+              </p>
+            )}
+            {notes?.detection_note && (
+              <p
+                className="mt-2 rounded border border-yellow-300 bg-yellow-50 p-2 text-sm text-yellow-900"
+                data-testid="detection-note"
+              >
+                {notes.detection_note}
+              </p>
+            )}
           </div>
 
-          <div className="rounded border border-gray-200 p-4">
+          <div className="rounded border border-gray-300 p-4">
             <label
               htmlFor="instrument"
               className="mb-1 block text-sm font-medium"
@@ -1422,7 +1531,7 @@ export default function ProjectDetailPage() {
               id="instrument"
               value={instrumentKey}
               onChange={(e) => setInstrumentKey(e.target.value)}
-              className="rounded border border-gray-300 px-3 py-2 text-sm"
+              className="rounded border border-gray-400 px-3 py-2 text-sm"
             >
               {INSTRUMENTS.map((inst) => (
                 <option key={inst.key} value={inst.key}>
@@ -1430,7 +1539,7 @@ export default function ProjectDetailPage() {
                 </option>
               ))}
             </select>
-            <p className="mt-2 text-xs text-gray-500">
+            <p className="mt-2 text-xs text-gray-600">
               {selectedInstrument.fretted
                 ? `${selectedInstrument.label} shows tab output below — string lines with fret numbers, in ${selectedInstrument.tuning} tuning. Notes that don't fit the instrument's range are flagged clearly.`
                 : selectedInstrument.writtenOffset > 0
@@ -1472,21 +1581,21 @@ export default function ProjectDetailPage() {
             <a
               href={midiDownloadUrl(projectId)}
               download
-              className="rounded border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-50"
+              className="rounded border border-gray-400 px-4 py-2 text-sm font-medium hover:bg-gray-50"
             >
               Download MIDI
             </a>
             <a
               href={jsonDownloadUrl(projectId)}
               download
-              className="rounded border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-50"
+              className="rounded border border-gray-400 px-4 py-2 text-sm font-medium hover:bg-gray-50"
             >
               Download JSON
             </a>
             <a
               href={musicxmlDownloadUrl(projectId, instrumentKey, sheetStyle)}
               download
-              className="rounded border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-50"
+              className="rounded border border-gray-400 px-4 py-2 text-sm font-medium hover:bg-gray-50"
             >
               Download MusicXML ({selectedInstrument.label})
             </a>
@@ -1495,7 +1604,7 @@ export default function ProjectDetailPage() {
                 href={tabDownloadUrl(projectId, instrumentKey)}
                 download
                 data-testid="download-tab"
-                className="rounded border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-50"
+                className="rounded border border-gray-400 px-4 py-2 text-sm font-medium hover:bg-gray-50"
               >
                 Download TAB ({selectedInstrument.label})
               </a>
@@ -1504,7 +1613,7 @@ export default function ProjectDetailPage() {
               type="button"
               onClick={handlePdfDownload}
               disabled={pdfDownloading}
-              className="flex items-center gap-2 rounded border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex items-center gap-2 rounded border border-gray-400 px-4 py-2 text-sm font-medium hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {pdfDownloading && (
                 <span
@@ -1520,7 +1629,7 @@ export default function ProjectDetailPage() {
           </div>
 
           {selectedInstrument.fretted && (
-            <p className="text-xs text-gray-500">
+            <p className="text-xs text-gray-600">
               For {selectedInstrument.label.toLowerCase()}, the MusicXML and
               PDF downloads still use staff notation — a proper tab PDF is
               coming in a later version. The TAB download is a plain text
@@ -1541,7 +1650,7 @@ export default function ProjectDetailPage() {
           )}
 
           {!notesError && !notes && (
-            <p className="text-sm text-gray-500">Loading notes…</p>
+            <p className="text-sm text-gray-600">Loading notes…</p>
           )}
 
           {notes && notes.note_count === 0 && (
@@ -1562,6 +1671,7 @@ export default function ProjectDetailPage() {
                 notes={workingNotes}
                 instrumentKey={instrumentKey}
                 onTick={handlePlayTick}
+                registerSeek={registerSeek}
                 autoScroll={autoScroll}
                 onAutoScrollChange={setAutoScroll}
               />
@@ -1589,7 +1699,7 @@ export default function ProjectDetailPage() {
                   {chords && chords.length > 0 && (
                     <>
                       <ChordStrip chords={chords} melodyEnd={melodyEnd} secondsPerBar={secondsPerBar} />
-                      <p className="mb-2 text-xs text-gray-500">
+                      <p className="mb-2 text-xs text-gray-600">
                         Chords are shown as names only for now — no strummed
                         chord shapes on the tab yet.
                       </p>
@@ -1600,6 +1710,7 @@ export default function ProjectDetailPage() {
                     instrumentKey={instrumentKey}
                     notesVersion={notesVersion}
                     currentNoteIndex={playNoteIndex}
+                    onSeekNote={handleSeekNote}
                     autoScroll={autoScroll}
                   />
                 </div>
@@ -1626,12 +1737,13 @@ export default function ProjectDetailPage() {
                     sheetStyle={sheetStyle}
                     notesVersion={notesVersion}
                     playPosition={playPosition}
+                    onSeek={handleSeek}
                     autoScroll={autoScroll}
                   />
                 </div>
               )}
 
-              <details className="rounded border border-gray-200 p-3">
+              <details className="rounded border border-gray-300 p-3">
                 <summary className="cursor-pointer text-sm font-medium text-gray-700">
                   Advanced note timeline ({workingNotes.length} notes)
                 </summary>
@@ -1641,6 +1753,7 @@ export default function ProjectDetailPage() {
                     playheadTime={playPosition}
                     currentNoteIndex={playNoteIndex}
                     autoScroll={autoScroll}
+                    onSeek={handleSeek}
                   />
                 </div>
               </details>
@@ -1650,7 +1763,7 @@ export default function ProjectDetailPage() {
                   <h2 className="text-lg font-medium">Note detail</h2>
                   <div className="flex items-center gap-3">
                     {saveState === "saving" && (
-                      <span className="text-xs text-gray-500">Saving edits…</span>
+                      <span className="text-xs text-gray-600">Saving edits…</span>
                     )}
                     {saveState === "saved" && (
                       <span className="text-xs text-green-700" data-testid="edits-saved">
@@ -1661,7 +1774,7 @@ export default function ProjectDetailPage() {
                       type="button"
                       onClick={handleResetNotes}
                       data-testid="reset-notes"
-                      className="rounded border border-gray-300 px-3 py-1 text-xs font-medium hover:bg-gray-50"
+                      className="rounded border border-gray-400 px-3 py-1 text-xs font-medium hover:bg-gray-50"
                     >
                       Reset to original transcription
                     </button>
@@ -1688,9 +1801,10 @@ export default function ProjectDetailPage() {
                   autoScroll={autoScroll}
                   onDelete={handleDeleteNote}
                   onEdit={handleEditNote}
+                  onSeekNote={handleSeekNote}
                 />
                 <div className="mt-2 flex flex-wrap items-start justify-between gap-2">
-                  <p className="text-xs text-gray-500">
+                  <p className="text-xs text-gray-600">
                     Type in a pitch (like G4 or F#3), start time or duration
                     and press Enter (or click away) to fix a wrong note.
                     Click ✕ to delete one. The preview, playback, tab and all
@@ -1700,7 +1814,7 @@ export default function ProjectDetailPage() {
                     type="button"
                     onClick={handleAddNote}
                     data-testid="add-note"
-                    className="rounded border border-gray-300 px-3 py-1 text-xs font-medium hover:bg-gray-50"
+                    className="rounded border border-gray-400 px-3 py-1 text-xs font-medium hover:bg-gray-50"
                   >
                     + Add a note
                   </button>

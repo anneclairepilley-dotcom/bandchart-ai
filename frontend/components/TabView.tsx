@@ -11,6 +11,8 @@ interface TabViewProps {
   notesVersion: number;
   /** Index of the note Play Along is currently sounding; null when stopped. */
   currentNoteIndex: number | null;
+  /** Called with a note index when a tab column is clicked (v0.9.2 seek). */
+  onSeekNote?: (noteIndex: number) => void;
   autoScroll: boolean;
 }
 
@@ -25,6 +27,7 @@ export default function TabView({
   instrumentKey,
   notesVersion,
   currentNoteIndex,
+  onSeekNote,
   autoScroll,
 }: TabViewProps) {
   const scrollBoxRef = useRef<HTMLDivElement>(null);
@@ -100,7 +103,7 @@ export default function TabView({
   }
 
   if (loadState === "loading" || !data) {
-    return <p className="text-sm text-gray-500">Building tab…</p>;
+    return <p className="text-sm text-gray-600">Building tab…</p>;
   }
 
   return (
@@ -123,13 +126,13 @@ export default function TabView({
       )}
 
       {data.entries.length === 0 ? (
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-gray-600">
           No notes to show — the note list is empty.
         </p>
       ) : (
         <div
           ref={scrollBoxRef}
-          className="max-h-[420px] overflow-auto rounded border border-gray-300 bg-white p-4"
+          className="max-h-[420px] overflow-auto rounded border border-gray-400 bg-white p-4"
           data-testid="tab-scrollbox"
         >
           <pre className="font-mono text-base leading-7" data-testid="tab-pre">
@@ -149,7 +152,7 @@ export default function TabView({
                             className={
                               cIndex === 0
                                 ? "font-semibold text-gray-900"
-                                : "text-gray-400"
+                                : "text-gray-600"
                             }
                           >
                             {cell.t}
@@ -163,13 +166,23 @@ export default function TabView({
                         <span
                           key={cIndex}
                           data-current={isCurrent ? "true" : undefined}
-                          className={
-                            isCurrent ? "rounded-sm bg-orange-200" : undefined
+                          onClick={
+                            onSeekNote && cell.i !== null
+                              ? () => onSeekNote(cell.i as number)
+                              : undefined
                           }
+                          title={
+                            onSeekNote && cell.i !== null
+                              ? "Click to move the playhead here"
+                              : undefined
+                          }
+                          className={`${
+                            isCurrent ? "rounded-sm bg-orange-200 " : ""
+                          }${onSeekNote && cell.i !== null ? "cursor-pointer" : ""}`}
                         >
                           {match ? (
                             <>
-                              <span className="text-gray-400">{match[1]}</span>
+                              <span className="text-gray-500">{match[1]}</span>
                               <span
                                 className={
                                   match[2] === "x"
@@ -181,7 +194,7 @@ export default function TabView({
                               </span>
                             </>
                           ) : (
-                            <span className="text-gray-400">{cell.t}</span>
+                            <span className="text-gray-600">{cell.t}</span>
                           )}
                         </span>
                       );
@@ -194,7 +207,7 @@ export default function TabView({
         </div>
       )}
 
-      <p className="mt-1 text-xs text-gray-500">
+      <p className="mt-1 text-xs text-gray-600">
         Each column is one detected note, in playing order (numbers are frets,
         low frets preferred). Bar lines follow the app&apos;s fixed 120 BPM
         grid. During Play Along the current column is highlighted in orange.

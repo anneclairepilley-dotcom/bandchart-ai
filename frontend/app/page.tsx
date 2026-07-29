@@ -181,7 +181,7 @@ export default function HomePage() {
 
   return (
     <main className="mx-auto flex max-w-2xl flex-col gap-8 p-6">
-      <section className="rounded-lg border border-gray-200 bg-white p-6 text-center shadow-sm">
+      <section className="rounded-lg border border-gray-300 bg-white p-6 text-center shadow-sm">
         <h1 className="text-3xl font-semibold">Turn sound into sheet music</h1>
         <p className="mx-auto mt-2 max-w-md text-sm text-gray-600">
           Upload audio or paste a YouTube link and BandChart will create sheet
@@ -217,7 +217,7 @@ export default function HomePage() {
             {busy === "upload" ? "Uploading…" : "Upload audio"}
           </button>
 
-          <div className="flex items-center gap-2 text-xs text-gray-400">
+          <div className="flex items-center gap-2 text-xs text-gray-600">
             <span className="h-px flex-1 bg-gray-200" aria-hidden />
             or
             <span className="h-px flex-1 bg-gray-200" aria-hidden />
@@ -235,14 +235,14 @@ export default function HomePage() {
                 placeholder="https://www.youtube.com/watch?v=…"
                 disabled={busy !== null}
                 data-testid="hero-yt-url"
-                className="flex-1 rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                className="flex-1 rounded border border-gray-400 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
               />
               <button
                 type="button"
                 onClick={handleYoutubeImport}
                 disabled={busy !== null || !ytUrl.trim() || !ytRights}
                 data-testid="hero-yt-import"
-                className="flex items-center gap-2 rounded border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                className="flex items-center gap-2 rounded border border-gray-400 px-4 py-2 text-sm font-medium hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {busy === "youtube" && (
                   <span
@@ -267,7 +267,7 @@ export default function HomePage() {
                 for private transcription/arrangement use.
               </span>
             </label>
-            <p className="text-xs text-gray-400">
+            <p className="text-xs text-gray-600">
               BandChart AI does not publish, share or create a public library
               from your transcription. If YouTube blocks the import (common on
               cloud servers), upload an audio file instead.
@@ -275,7 +275,7 @@ export default function HomePage() {
           </div>
 
           {busy === "youtube" && (
-            <p className="text-left text-xs text-gray-500">
+            <p className="text-left text-xs text-gray-600">
               Importing from YouTube — checking the link, extracting the audio
               and converting it… this can take a minute for longer clips.
             </p>
@@ -291,7 +291,7 @@ export default function HomePage() {
           )}
         </div>
 
-        <p className="mt-4 text-xs text-gray-400">
+        <p className="mt-4 text-xs text-gray-600">
           Works best with one clear melody — a voice, a whistle or a solo
           instrument. BandChart is melody-first; full band separation is
           coming later.
@@ -308,11 +308,11 @@ export default function HomePage() {
         )}
 
         {!loadError && projects === null && (
-          <p className="text-sm text-gray-500">Loading projects…</p>
+          <p className="text-sm text-gray-600">Loading projects…</p>
         )}
 
         {!loadError && projects !== null && projects.length === 0 && (
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-gray-600">
             Nothing here yet — upload a recording or import a YouTube link
             above to get started.
           </p>
@@ -325,7 +325,7 @@ export default function HomePage() {
         )}
 
         {!loadError && projects !== null && projects.length > 0 && (
-          <ul className="flex flex-col divide-y divide-gray-200 rounded border border-gray-200">
+          <ul className="flex flex-col divide-y divide-gray-200 rounded border border-gray-300">
             {projects.map((project) => (
               <li
                 key={project.id}
@@ -337,7 +337,7 @@ export default function HomePage() {
                 >
                   <div className="flex flex-col">
                     <span className="font-medium">{project.name}</span>
-                    <span className="text-xs text-gray-500">
+                    <span className="text-xs text-gray-600">
                       Created {new Date(project.created_at).toLocaleString()}
                     </span>
                   </div>
