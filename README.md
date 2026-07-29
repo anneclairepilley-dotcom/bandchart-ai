@@ -70,7 +70,10 @@ own local storage — and Codespaces keeps working as before.)
 It takes three double-clicks, described step by step in the next section:
 
 1. **`check.command`** — confirms Python, Node/npm, ffmpeg and yt-dlp are ready, with an
-   install command for anything missing (ffmpeg matters: **YouTube import needs it**)
+   install command for anything missing (ffmpeg matters: **YouTube import needs it**).
+   The app prefers Homebrew's **Python 3.12** when installed and warns if your Python is
+   older than 3.10 (old versions still run, but tools like yt-dlp are dropping them —
+   `brew install python@3.12` is the fix, and setup rebuilds everything automatically)
 2. **`setup.command`** — installs everything the app needs, including yt-dlp for YouTube
    import (safe to run again any time). If the optional PDF engine (verovio) can't be
    built on your Mac, setup completes anyway with a fallback: everything works except the
@@ -167,8 +170,10 @@ That's it. Create a project, upload a song, click "Run Transcription", and downl
 The double-click scripts above are macOS-only, and the Codespaces steps assume a browser
 terminal. On any other platform, or if you'd rather run things yourself, follow these steps.
 
-Requires **Python 3.9+** and **Node.js 18+**. Install `ffmpeg` too if you want to transcribe
-compressed formats like mp3/m4a (wav/flac/ogg work without it).
+Requires **Python 3.10+** (3.9 still runs, but dependencies like yt-dlp are deprecating it
+— the Mac scripts prefer Homebrew's Python 3.12 automatically) and **Node.js 18+**.
+Install `ffmpeg` too for YouTube import and compressed formats like mp3/m4a (wav/flac/ogg
+uploads work without it).
 
 ### 1. Backend (FastAPI + librosa)
 
