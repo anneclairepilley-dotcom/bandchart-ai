@@ -15,6 +15,7 @@ from app import storage
 from app.models import NotesUpdate, Project, ProjectCreate, YoutubeImport
 from app.musicxml import INSTRUMENTS, notes_to_musicxml
 from app.pdf import musicxml_to_pdf
+from app.tablature import TUNINGS, build_tab
 from app.transcription import run_transcription, write_midi_from_notes
 from app.youtube import YoutubeImportError, download_audio_as_wav, is_valid_youtube_url
 
@@ -373,6 +374,50 @@ def download_json(project_id: str) -> FileResponse:
     if not json_p.exists():
         raise HTTPException(status_code=404, detail="Project has not been transcribed yet")
     return FileResponse(path=str(json_p), media_type="application/json", filename="transcription.json")
+
+
+def _build_tab_or_error(project_id: str, instrument: str) -> dict:
+    """Validate a tab request and build the tab from the current notes."""
+    project = _get_project_or_404(project_id)
+    if instrument not in TUNINGS:
+        raise HTTPException(
+            status_code=400,
+            detail="Tab is only available for these instruments: "
+            + ", ".join(sorted(TUNINGS))
+            + f". '{instrument}' uses regular sheet music instead.",
+        )
+    json_p = storage.transcription_json_path(project_id)
+    if not json_p.exists():
+        raise HTTPException(status_code=404, detail="Project has not been transcribed yet")
+    data = json.loads(json_p.read_text())
+    try:
+        return build_tab(data["notes"], instrument, project.name)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=500,
+            detail=f"Couldn't build the tab ({exc}). Try re-running the transcription.",
+        ) from exc
+
+
+@app.get("/api/projects/{project_id}/tab")
+def get_tab(project_id: str, instrument: str = "guitar") -> JSONResponse:
+    """Structured tab (entries, warnings, preview cells) for the web preview."""
+    return JSONResponse(content=_build_tab_or_error(project_id, instrument))
+
+
+@app.get("/api/projects/{project_id}/download/tab")
+def download_tab(project_id: str, instrument: str = "guitar") -> FileResponse:
+    tab = _build_tab_or_error(project_id, instrument)
+    if tab["note_count"] == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="There are no notes to export — the note list is empty. "
+            "Reset to the original transcription or transcribe again first.",
+        )
+    out_p = storage.tab_path(project_id, instrument)
+    out_p.parent.mkdir(parents=True, exist_ok=True)
+    out_p.write_text(tab["text"])
+    return FileResponse(path=str(out_p), media_type="text/plain", filename=out_p.name)
 
 
 def _generate_musicxml_or_error(project_id: str, instrument: str, style: str) -> Path:

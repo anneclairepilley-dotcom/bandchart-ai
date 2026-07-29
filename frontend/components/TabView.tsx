@@ -1,0 +1,172 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { fetchTab, ApiError, type TabData } from "@/lib/api";
+
+interface TabViewProps {
+  projectId: string;
+  /** A fretted instrument key: guitar, bass or ukulele. */
+  instrumentKey: string;
+  /** Bump to force a re-fetch (e.g. after note edits are saved). */
+  notesVersion: number;
+  /** Index of the note Play Along is currently sounding; null when stopped. */
+  currentNoteIndex: number | null;
+  autoScroll: boolean;
+}
+
+/**
+ * Text-style tablature preview for guitar/bass/ukulele. The layout comes
+ * from the backend (the same code that writes the .txt download); every cell
+ * is tagged with its note index so the column of the note being played can
+ * be highlighted during Play Along.
+ */
+export default function TabView({
+  projectId,
+  instrumentKey,
+  notesVersion,
+  currentNoteIndex,
+  autoScroll,
+}: TabViewProps) {
+  const scrollBoxRef = useRef<HTMLDivElement>(null);
+
+  // Load state is keyed by the current inputs so a deps change implicitly
+  // reads as "loading" without any synchronous setState in the effect.
+  const depsKey = `${projectId}|${instrumentKey}|${notesVersion}`;
+  const [result, setResult] = useState<{
+    key: string;
+    state: "ready" | "error";
+    data?: TabData;
+    detail?: string;
+  } | null>(null);
+  const loadState =
+    result?.key === depsKey ? result.state : ("loading" as const);
+  const data = result?.key === depsKey ? result.data : undefined;
+  const errorDetail = result?.key === depsKey ? result.detail : undefined;
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchTab(projectId, instrumentKey)
+      .then((tab) => {
+        if (!cancelled) setResult({ key: depsKey, state: "ready", data: tab });
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setResult({
+            key: depsKey,
+            state: "error",
+            detail:
+              err instanceof ApiError || err instanceof Error
+                ? err.message
+                : String(err),
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, instrumentKey, notesVersion, depsKey]);
+
+  // Keep the highlighted column in view while playing, scrolling only the
+  // tab box (never the page).
+  useEffect(() => {
+    if (!autoScroll || currentNoteIndex === null || !scrollBoxRef.current) {
+      return;
+    }
+    const box = scrollBoxRef.current;
+    const cell = box.querySelector<HTMLElement>('[data-current="true"]');
+    if (!cell) return;
+    const cellTop =
+      cell.getBoundingClientRect().top -
+      box.getBoundingClientRect().top +
+      box.scrollTop;
+    const viewTop = box.scrollTop;
+    const viewBottom = viewTop + box.clientHeight;
+    if (cellTop < viewTop + 20 || cellTop > viewBottom - 40) {
+      box.scrollTo({
+        top: Math.max(0, cellTop - box.clientHeight / 2),
+        behavior: "smooth",
+      });
+    }
+  }, [currentNoteIndex, autoScroll]);
+
+  if (loadState === "error") {
+    return (
+      <p className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+        Couldn&apos;t build the tab preview ({errorDetail}). The note table
+        and other downloads still work — try switching instruments and back,
+        or reload the page.
+      </p>
+    );
+  }
+
+  if (loadState === "loading" || !data) {
+    return <p className="text-sm text-gray-500">Building tab…</p>;
+  }
+
+  return (
+    <div>
+      <p className="mb-2 text-sm text-gray-600">
+        Tuning: <span className="font-medium">{data.tuning}</span>
+      </p>
+
+      {data.warnings.length > 0 && (
+        <div
+          className="mb-2 rounded border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800"
+          data-testid="tab-warnings"
+        >
+          {data.warnings.map((w, i) => (
+            <p key={i} className={i > 0 ? "mt-1" : undefined}>
+              {w}
+            </p>
+          ))}
+        </div>
+      )}
+
+      {data.entries.length === 0 ? (
+        <p className="text-sm text-gray-500">
+          No notes to show — the note list is empty.
+        </p>
+      ) : (
+        <div
+          ref={scrollBoxRef}
+          className="max-h-[420px] overflow-auto rounded border border-gray-200 bg-white p-3"
+          data-testid="tab-scrollbox"
+        >
+          <pre className="font-mono text-sm leading-5" data-testid="tab-pre">
+            {data.systems.map((system, sIndex) => (
+              <div key={sIndex} className={sIndex > 0 ? "mt-4" : undefined}>
+                {system.map((line, lIndex) => (
+                  <div key={lIndex}>
+                    {line.map((cell, cIndex) => (
+                      <span
+                        key={cIndex}
+                        data-current={
+                          cell.i !== null && cell.i === currentNoteIndex
+                            ? "true"
+                            : undefined
+                        }
+                        className={
+                          cell.i !== null && cell.i === currentNoteIndex
+                            ? "rounded-sm bg-orange-200 text-orange-900"
+                            : undefined
+                        }
+                      >
+                        {cell.t}
+                      </span>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </pre>
+        </div>
+      )}
+
+      <p className="mt-1 text-xs text-gray-500">
+        Each column is one detected note, in playing order (numbers are frets,
+        low frets preferred). Bar lines follow the app&apos;s fixed 120 BPM
+        grid. During Play Along the current column is highlighted in orange.
+      </p>
+    </div>
+  );
+}

@@ -36,6 +36,11 @@ INSTRUMENTS: dict[str, dict[str, Any]] = {
     "tenor_sax": {"label": "Tenor Sax", "m21": instrument.TenorSaxophone, "written_offset": 14},
     "trumpet": {"label": "Trumpet", "m21": instrument.Trumpet, "written_offset": 2},
     "clarinet": {"label": "Clarinet", "m21": instrument.Clarinet, "written_offset": 2},
+    # v0.7 fretted instruments: their main output is text tab (app/tablature.py),
+    # but they keep working here so MusicXML/PDF still export staff notation.
+    "guitar": {"label": "Guitar", "m21": instrument.Guitar, "written_offset": 0},
+    "bass": {"label": "Bass", "m21": instrument.ElectricBass, "written_offset": 0},
+    "ukulele": {"label": "Ukulele", "m21": instrument.Ukulele, "written_offset": 0},
 }
 
 

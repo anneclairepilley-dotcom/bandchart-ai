@@ -9,6 +9,10 @@ export interface InstrumentOption {
   key: string;
   label: string;
   writtenOffset: number;
+  /** Fretted instruments (guitar/bass/ukulele) show tab instead of staff notation. */
+  fretted?: boolean;
+  /** Standard tuning, shown with the tab output. */
+  tuning?: string;
 }
 
 export const INSTRUMENTS: InstrumentOption[] = [
@@ -20,6 +24,27 @@ export const INSTRUMENTS: InstrumentOption[] = [
   { key: "tenor_sax", label: "Tenor Sax (B♭)", writtenOffset: 14 },
   { key: "trumpet", label: "Trumpet (B♭)", writtenOffset: 2 },
   { key: "clarinet", label: "Clarinet (B♭)", writtenOffset: 2 },
+  {
+    key: "guitar",
+    label: "Guitar",
+    writtenOffset: 0,
+    fretted: true,
+    tuning: "E2 A2 D3 G3 B3 E4 (standard)",
+  },
+  {
+    key: "bass",
+    label: "Bass",
+    writtenOffset: 0,
+    fretted: true,
+    tuning: "E1 A1 D2 G2 (standard)",
+  },
+  {
+    key: "ukulele",
+    label: "Ukulele",
+    writtenOffset: 0,
+    fretted: true,
+    tuning: "G4 C4 E4 A4 (standard, high G)",
+  },
 ];
 
 const NOTE_NAMES = [

@@ -1,6 +1,6 @@
 # BandChart AI — Project Notes
 
-Living notes for contributors (human or AI). Last updated after v0.2 (2026-07).
+Living notes for contributors (human or AI). Last updated after v0.7 (2026-07).
 If you are a new Claude Code session: read this file, then README.md, before changing code.
 
 ## Purpose
@@ -72,9 +72,39 @@ Explanations, error messages, and README instructions must stay beginner-friendl
   "Sheet music style" radio toggle (Cleaned recommended/default vs Raw)
 - MIDI/JSON downloads intentionally stay raw — they're the faithful record
 
-### v0.7 — planned next
-Not decided. Ask the owner. (Long-term list: full band charts, rehearsal packs, tabs —
-none approved; see out-of-scope below.)
+### v0.7 — guitar / bass / ukulele tab (done)
+- `backend/app/tablature.py`: the detected melody (the working notes, raw — same list as
+  the note table and Play Along, so indexes line up) becomes text tab for three fretted
+  instruments in standard tuning: guitar E2 A2 D3 G3 B3 E4, bass E1 A1 D2 G2, ukulele
+  G4 C4 E4 A4 (high G, reentrant — range extremes must be found by pitch, not line order)
+- Placement: each note goes on one string at the lowest playable fret (≤15). If the
+  melody doesn't fit the instrument, a whole-octave shift is chosen automatically
+  (most notes in range, then most frets ≤12, then smallest shift — bass usually lands
+  −1 or −2 octaves) and reported as a warning; notes that still don't fit render as `x`
+  on the nearest string and are listed in a warning. Never crashes on range problems
+- Layout: one column per note in time order, `|` at each measure change (2s bars at the
+  fixed 120 BPM), systems wrapped at ~56 chars. Built once in Python and returned BOTH as
+  plain text (the .txt download) and as per-line cells tagged with note indexes so the
+  web preview can highlight the playing column — don't duplicate the layout in TS
+- Endpoints: `GET /projects/{id}/tab?instrument=<guitar|bass|ukulele>` (JSON for the
+  preview) and `GET /projects/{id}/download/tab?instrument=…` (.txt). 400 for
+  non-fretted instruments and for empty note lists (download only), 404 untranscribed
+- guitar/bass/ukulele were ALSO added to the INSTRUMENTS table (musicxml.py +
+  lib/instruments.ts, now 11 keys) with written_offset 0 (music21 treats them as
+  non-transposing), so MusicXML/PDF keep working for them — as staff notation. The UI
+  says a proper tab PDF is a later version
+- Frontend: `components/TabView.tsx` (SheetMusic's depsKey fetch pattern; re-fetches on
+  notesVersion bump so note deletes update it after auto-save). Fretted selection swaps
+  the Sheet music panel for a Tab output panel; Download TAB button appears only for
+  fretted keys. Play Along is untouched and highlights the tab column via
+  currentNoteIndex (cells carry the note index; whole column highlights)
+- Tab is generated from the detected melody line — it is NOT full guitar/bass extraction
+  from a mixed song, and there are no chords (still monophonic)
+
+### v0.8 — planned next
+Not decided. Ask the owner. Long-term: v2.0 is still planned as the big black/silver
+redesign (not yet — the owner will ask for it explicitly). Other long-term items (full
+band charts, rehearsal packs) remain unapproved; see out-of-scope below.
 
 ### v0.6.2 — verovio made optional for Mac setup (done)
 - verovio sometimes has no wheel for a Mac's Python/OS combo and fails to compile
@@ -243,6 +273,16 @@ Next.js proxy, plus confirmed by the owner in Codespaces:
   upload still works alongside it. PDF export needed one extra step locally
   (`brew install cairo`), after which the whole app works. Codespaces may still get
   bot-blocked by YouTube (expected; local Mac is the reliable path for YouTube import)
+- v0.7 tab: fret mapping unit-tested (guitar melody on the top string, bass auto-shift
+  −2 octaves with warning, ukulele open strings, mixed-extreme melody gets `x` + both
+  warnings, empty list, TabError on piano); all three .txt downloads verified via the
+  proxy; in-browser (Playwright): tab preview appears for all three instruments with
+  correct string lines, Download TAB fires a real download with the right filename and
+  content, Play Along runs with a tab instrument and highlights the current column
+  (checked mid-playback at the correct note), deleting a note removes its column from
+  preview AND download after auto-save, reset restores it, piano still shows OSMD sheet
+  with no tab UI, staff MusicXML/PDF 200 for the fretted keys in both styles, all
+  pre-v0.7 endpoints re-checked 200, `npm run build` + tsc + lint clean
 - v0.5.7 delete: confirmation shows the exact agreed wording; cancel keeps the project;
   confirm removes it from the list immediately and survives a page refresh; the storage
   folder is gone from disk; other projects (sheet, downloads) unaffected; deleting an
@@ -312,6 +352,7 @@ backend/  FastAPI (Python 3.9+; owner's Codespace uses 3.12)
   app/transcription.py  pYIN engine — DO NOT swap without explicit request
   app/youtube.py        yt-dlp/ffmpeg YouTube audio import (validation + guards)
   app/musicxml.py       music21 export + INSTRUMENTS table (style=clean|raw)
+  app/tablature.py      text tab for guitar/bass/ukulele (tunings, octave fit, layout)
   app/notation_cleanup.py  wobble/merge/fragment/quantize pipeline for clean style
   app/pdf.py            verovio/cairosvg/pypdf PDF engraving (singleton toolkit + lock)
   app/storage.py        storage/projects/<id>/{project.json,audio/,output/}
@@ -321,6 +362,7 @@ frontend/ Next.js 16 (app router, Tailwind, TypeScript)
                                 note-edit working copy + debounced auto-save)
   components/PlayAlong.tsx      Web Audio play-along engine + panel (3 synth voices)
   components/SheetMusic.tsx     OSMD sheet render + playback cursor sync
+  components/TabView.tsx        text-tab preview for fretted instruments + highlight
   lib/api.ts                    typed fetch helpers; API_BASE_URL defaults to "" (same-origin)
   lib/instruments.ts            instrument keys/labels/offsets (mirror of backend)
   next.config.ts                /api rewrite proxy, 60MB body, 10-min timeout,
