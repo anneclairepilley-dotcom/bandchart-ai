@@ -357,6 +357,14 @@ export default function HomePage() {
           </ul>
         )}
       </section>
+
+      <p className="mt-2 text-center text-xs text-gray-500">
+        <Link href="/engine-lab" className="underline hover:text-gray-700" data-testid="engine-lab-link">
+          Engine Lab
+        </Link>{" "}
+        — a developer tool for comparing transcription engines, not part of the
+        normal workflow.
+      </p>
     </main>
   );
 }
