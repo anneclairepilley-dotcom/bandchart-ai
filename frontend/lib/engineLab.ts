@@ -147,6 +147,15 @@ export function listRuns(): Promise<RunResult[]> {
   return request<RunResult[]>("/api/engine-lab/runs");
 }
 
+/** "Use this output": make a lab run's notes the project's active
+ * transcription. Only works for a run whose source was that same
+ * project's own audio — the backend rejects anything else. */
+export function applyRunToProject(runId: string, projectId: string): Promise<RunResult> {
+  return request<RunResult>(`/api/engine-lab/runs/${runId}/apply/${projectId}`, {
+    method: "POST",
+  });
+}
+
 export function runMidiDownloadUrl(runId: string): string {
   return `${API_BASE_URL}/api/engine-lab/runs/${runId}/download/midi`;
 }

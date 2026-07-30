@@ -1,6 +1,6 @@
 # BandChart AI — Project Notes
 
-Living notes for contributors (human or AI). Last updated after v0.9.4 (2026-07).
+Living notes for contributors (human or AI). Last updated after v0.9.5 (2026-07).
 If you are a new Claude Code session: read this file, then README.md, before changing code.
 
 ## Purpose
@@ -220,6 +220,94 @@ Explanations, error messages, and README instructions must stay beginner-friendl
   padding, readable-mode long-note truncation, a Start double-click race, the
   0.0-certainty mask, same-slot keep-later inconsistency, stale YouTube copy, stale
   setupError, and the frontend's hardcoded 2s bars — all fixed and re-verified
+
+### v0.9.5 — smart transcription routing (done)
+Uses the v0.9.4 Engine Lab findings to make BandChart choose engine/polyphony settings
+per instrument automatically, and report exactly what it did — no rebuild, purely
+additive on top of the existing pYIN/Basic Pitch/CQT pipeline.
+
+**`backend/app/routing.py`** (new, pure decision logic — never runs detection itself):
+- `INSTRUMENT_MAX_POLYPHONY = {"violin": 2}` — everything else keeps
+  `polyphonic.MAX_POLYPHONY` (4). Threaded through `detect_notes_poly()` ->
+  `_detect_with_basic_pitch()`/`_detect_with_cqt()` -> `_assign_groups(max_polyphony=)`
+  — **gotcha (hard-won)**: `_assign_groups`'s own overflow message used to hardcode
+  "strongest 4 were kept" regardless of the actual cap; now interpolates
+  `max_polyphony` — a violin run would have said "4" while only keeping 2 otherwise
+- `DIRECT_AUTO_POLY_INSTRUMENTS = SOLO_AUTO_POLY_INSTRUMENTS = {"piano"}` — piano now
+  defaults to polyphonic detection in BOTH modes (previously only Direct, via the
+  frontend's `detectionTouchedRef` heuristic); `default_note_detection(instrument, mode)`
+  is the single source of truth, mirrored in the frontend as
+  `defaultNoteDetection(instrument)` (mode dropped there since both instrument sets are
+  currently identical — kept per-mode in the backend for future flexibility)
+- `INSTRUMENT_POLY_NOTES` — exact-wording caution strings for guitar
+  ("Guitar chord/tab output is experimental. TAB may show the main playable line
+  first.") and violin ("Violin output is limited to melody and simple double-stops for
+  now."), appended to `warnings` only when the engine actually ran in poly mode
+  (never shown after a fallback to pyin, where they'd be misleading)
+- `describe_difficulty(notes, messages, engine_used)` — rough density label from the
+  ACTUAL result, not audio pre-analysis. **Gotcha (hard-won, caught before shipping)**:
+  the first version used `overlap_ratio > 0.5` as a dense-signal, which false-positives
+  on any clean fully-grouped chord (a single 3-note chord is 100% grouped) — a genuine
+  C major triad was reading "Dense piano/audio — may need editing", which is dishonest.
+  Fixed to key off `avg_group_size >= 3.5` (chords consistently near the polyphony cap)
+  and the engine's own overflow messages ("too dense" / "only the strongest N were
+  kept") — the single most reliable density signal there is, since it means the
+  detector itself had to trim something
+- `run_transcription()` (transcription.py) gains `instrument`/`mode` params, calls
+  `resolve_routing()`, and the result dict gains `engine_used` (derived from
+  `notes[0]["source"]` — reliable since one detection pass never mixes engines),
+  `routing_mode` (flips to "melody_only" in the OUTPUT if a poly request truly fell
+  back to pyin, even though the plan requested "multiple_notes" — Mode and Engine used
+  must never look contradictory), `fallback_reason` (exact strings: "Basic Pitch
+  unavailable — used the built-in simple detector instead." for CQT fallback, "Basic
+  Pitch failed, used melody-only fallback." for total fallback to pyin — both null on
+  a clean run or a melody-requested run), `warnings`, `difficulty`
+- `_save_working_notes` (main.py) preserves the 5 new fields exactly like
+  chords/detection/detection_note — a note edit or reset never changes which engine
+  produced the ORIGINAL detection, only which notes are stored
+- Verified: C major chord gate automated for Piano+Direct AND Piano+Solo (both detect
+  C4/E4/G4 together, one chord group, MIDI simultaneous, JSON overlapping); CQT-fallback
+  and total-fallback status fields unit-tested by monkeypatching; violin caps to ≤2 on
+  BOTH the Basic Pitch and CQT paths; guitar/violin instrument notes appear only when
+  poly actually ran
+
+**Engine Lab "Use this output"** (`engine_lab/routes.py`,
+`POST /runs/{run_id}/apply/{project_id}`): the one deliberate exception to "the lab
+never touches a project" — an explicit button, not automatic. Safety: 400 unless
+`run.source.kind == "project"` AND `run.source.project_id == project_id` (a
+fixture/upload run can never become a project's transcription, so a lab experiment
+can't accidentally overwrite the wrong thing); 400 if the run itself errored. Applying
+treats it like a fresh transcribe (chords reset to `[]`, `original_transcription.json`
+re-snapshotted so "Reset to original" resets back to the applied result, not whatever
+ran before), sets `project.note_detection` to match what was actually applied so future
+settings stay consistent. `describe_difficulty` reused directly (imported from
+`app.routing`) so lab-applied projects get the same honest status block as a normal
+transcribe.
+
+**Frontend**: `app/projects/[id]/page.tsx` gains an "Engine status" block under the
+audio player (`data-testid="engine-status"`) showing all 4 lines every time, never
+conditionally hidden — `ENGINE_LABELS`/`ROUTING_MODE_LABELS` maps for display text;
+Warnings line folds `difficulty` in as the first item (when not "Simple melody"/"No
+notes detected") ahead of the raw engine warnings, matching the single "Warnings:" line
+the request asked for while keeping the two concepts separate in the data model.
+`app/engine-lab/page.tsx` gained a "Use output" table column — a button when
+`run.source.kind === "project"`, "✓ Applied" after success, "—" otherwise; apply errors
+surface in a banner above the table.
+
+**Instrument scope note**: the request named 7 instruments explicitly (Guitar, Bass,
+Piano, Violin, Alto Sax, Trumpet, Voice) as "existing working features to keep" — read
+as which instruments this version's routing rules cover, NOT an instruction to remove
+Concert pitch/Flute/Tenor Sax/Clarinet/Ukulele from the picker (no REMOVE section
+mentioned them, and "Do not rebuild the app" argues against a destructive UI narrowing
+on an ambiguous read). All 12 instruments remain selectable; the 5 unlisted ones fall
+into the same melody-first default bucket as Alto Sax/Trumpet/Voice — flagged in the
+final report in case the owner actually wanted the narrower picker.
+
+**Mrs Magic**: still could not be run from this cloud environment (YouTube blocks
+cloud-server import, same as v0.9.3/v0.9.4) — routing now sends it through the
+strongest available route (Piano + Direct, Basic Pitch, up to 4 notes) but this is
+UNVERIFIED on the actual hard benchmark; the owner needs to run it locally. Not claimed
+solved.
 
 ### v0.9.4 — Engine Lab: comparing transcription engines honestly (done)
 Owner's core complaint: Mrs Magic (a hard real piano recording) still doesn't transcribe
@@ -697,8 +785,11 @@ Next.js proxy, plus confirmed by the owner in Codespaces:
 ## Current limitations
 - **Melody-first**: the default engine (pYIN) follows one melody line. Polyphonic mode
   (v0.9.3, Basic Pitch) is experimental — clear piano / simple chords only, max 4
-  simultaneous notes; full-band mixes and dense piano still won't transcribe accurately.
-  The best results still come from clear recordings of one instrument
+  simultaneous notes (2 for violin, v0.9.5); full-band mixes and dense piano still won't
+  transcribe accurately. The best results still come from clear recordings of one
+  instrument. v0.9.5's routing chooses good defaults per instrument, but does not make
+  the underlying detectors more accurate — Mrs Magic (the hard piano benchmark) remains
+  unsolved and unverified beyond this cloud environment's YouTube block
 - **Rhythm is approximate**: fixed 120 BPM assumption default 4/4 (3/4 and 6/8 selectable);
   cleaned style quantizes to an eighth grid (raw: sixteenth) — no real tempo/meter
   detection, so timing won't match a performance that isn't near 120 BPM
@@ -753,7 +844,10 @@ backend/  FastAPI (Python 3.9+; owner's Codespace uses 3.12)
   app/musicxml.py       music21 export + INSTRUMENTS table (style=clean|raw)
   app/tablature.py      text tab for guitar/bass/ukulele (tunings, octave fit, layout)
   app/polyphonic.py     polyphonic detection: Basic Pitch (ONNX, lazy import) primary,
-                        CQT+onset fallback; chord grouping, max 4 at once
+                        CQT+onset fallback; chord grouping, max_polyphony param (v0.9.5:
+                        instrument-specific caps, e.g. violin=2)
+  app/routing.py         v0.9.5 smart routing: per-instrument polyphony cap + default
+                        note_detection + caution notes + describe_difficulty()
   app/chords.py         chord-name validation, chart text, rough suggestions, keys
   (settings: Project.instrument/mode/time_signature/key_signature/rhythm_detail)
   app/notation_cleanup.py  wobble/merge/fragment/quantize pipeline for clean style
@@ -768,7 +862,9 @@ backend/  FastAPI (Python 3.9+; owner's Codespace uses 3.12)
     scoring.py             rough accuracy scoring against expected notes
     stats.py               engine-agnostic note_count/overlap/chord-group/pitch-range
     storage.py              storage/engine_lab/{fixtures,audio,runs}/ — separate tree
-    routes.py               APIRouter at /api/engine-lab, included in main.py
+    routes.py               APIRouter at /api/engine-lab, included in main.py; v0.9.5
+                          adds POST /runs/{id}/apply/{project_id} — the one endpoint
+                          here that DOES write to a project (explicit, guarded)
 frontend/ Next.js 16 (app router, Tailwind, TypeScript)
   app/page.tsx                  project list/create (+ quiet Engine Lab link)
   app/projects/[id]/page.tsx    the whole project workflow UI (memoized NoteTable inside,

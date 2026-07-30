@@ -58,6 +58,28 @@ const PITCH_CLASSES: Record<string, number> = {
 };
 
 /** Accepts a note name ("G4", "F#3", "Bb3") or a MIDI number ("67"). */
+// v0.9.5: display labels for the "Engine used" / "Mode" status line —
+// mirrors the engine keys backend/app/transcription.py reports.
+const ENGINE_LABELS: Record<string, string> = {
+  basic_pitch: "Basic Pitch",
+  cqt: "Built-in simple detector",
+  pyin: "pYIN (melody)",
+};
+const ROUTING_MODE_LABELS: Record<string, string> = {
+  melody_only: "Melody only",
+  multiple_notes: "Multiple notes",
+  double_stops: "Double-stops",
+};
+
+/** Mirrors backend/app/routing.py::default_note_detection — the note
+ * detection value to pre-select before the user touches the control
+ * themselves. Piano defaults to polyphonic detection in BOTH modes
+ * (v0.9.5): it's the one instrument with an obvious grand-staff home for
+ * chords, whether transcribed directly or arranged as a solo piece. */
+function defaultNoteDetection(instrument: string): "melody" | "poly" {
+  return instrument === "piano" ? "poly" : "melody";
+}
+
 function parsePitchInput(raw: string): number | null {
   const s = raw.trim();
   if (/^\d+$/.test(s)) {
@@ -341,7 +363,8 @@ export default function ProjectDetailPage() {
   // transcribing flag only flips once the transcription request starts).
   const [startBusy, setStartBusy] = useState(false);
   // v0.9.2: melody-only vs experimental multiple-note detection. Follows
-  // the piano+direct default until the user touches the control.
+  // the piano default (both modes, since v0.9.5 — see defaultNoteDetection)
+  // until the user touches the control.
   const [setupDetection, setSetupDetection] = useState<"melody" | "poly">(
     "melody"
   );
@@ -1283,12 +1306,7 @@ export default function ProjectDetailPage() {
                     setSetupInstrument(inst.key);
                     setSetupError(null);
                     if (!detectionTouchedRef.current) {
-                      setSetupDetection(
-                        inst.key === "piano" &&
-                          setupMode === "direct_transcription"
-                          ? "poly"
-                          : "melody"
-                      );
+                      setSetupDetection(defaultNoteDetection(inst.key));
                     }
                   }}
                   data-testid={`pick-${inst.key}`}
@@ -1327,12 +1345,7 @@ export default function ProjectDetailPage() {
                     setSetupMode(mode.key);
                     setSetupError(null);
                     if (!detectionTouchedRef.current) {
-                      setSetupDetection(
-                        setupInstrument === "piano" &&
-                          mode.key === "direct_transcription"
-                          ? "poly"
-                          : "melody"
-                      );
+                      setSetupDetection(defaultNoteDetection(setupInstrument ?? "concert"));
                     }
                   }}
                   data-testid={`mode-${mode.key === "direct_transcription" ? "direct" : "solo"}`}
@@ -1564,6 +1577,29 @@ export default function ProjectDetailPage() {
               >
                 {notes.detection_note}
               </p>
+            )}
+            {notes?.engine_used && (
+              <div
+                className="mt-2 rounded border border-gray-300 bg-gray-50 p-2 text-xs text-gray-700"
+                data-testid="engine-status"
+              >
+                <p>Engine used: {ENGINE_LABELS[notes.engine_used] ?? notes.engine_used}</p>
+                <p>Mode: {ROUTING_MODE_LABELS[notes.routing_mode ?? ""] ?? "Melody only"}</p>
+                <p>Fallback: {notes.fallback_reason ?? "none"}</p>
+                <p>
+                  Warnings:{" "}
+                  {[
+                    notes.difficulty &&
+                    notes.difficulty !== "Simple melody" &&
+                    notes.difficulty !== "No notes detected"
+                      ? notes.difficulty
+                      : null,
+                    ...(notes.warnings ?? []),
+                  ]
+                    .filter(Boolean)
+                    .join("; ") || "none"}
+                </p>
+              </div>
             )}
           </div>
 

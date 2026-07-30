@@ -1,16 +1,19 @@
 """Engine Lab API: /api/engine-lab/*.
 
 A side area, deliberately isolated from the main /api/projects/* routes and
-the real transcription pipeline — nothing here writes to a project's
-transcription.json or affects a normal transcribe run. It exists purely to
-run one engine at a time against a chosen audio source and report what
-happened, so engines can be compared honestly.
+the real transcription pipeline — running an engine here never writes to a
+project's transcription.json or affects a normal transcribe run. The one
+exception (v0.9.5) is POST /runs/{run_id}/apply/{project_id}: an explicit,
+opt-in "use this output" action the owner clicks after comparing engines,
+which deliberately DOES replace a project's active transcription — never
+automatic, and only for a run made from that same project's own audio.
 """
 
 from __future__ import annotations
 
 import json
 import mimetypes
+import shutil
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -23,6 +26,7 @@ from app import storage as project_storage
 from app.engine_lab import fixtures, scoring, stats
 from app.engine_lab import storage as lab_storage
 from app.engine_lab.adapters import ADAPTERS, get_adapter
+from app.routing import describe_difficulty
 from app.transcription import write_midi_from_notes
 
 router = APIRouter(prefix="/api/engine-lab", tags=["engine-lab"])
@@ -215,6 +219,71 @@ def get_run(run_id: str) -> dict[str, Any]:
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found.")
     return run
+
+
+@router.post("/runs/{run_id}/apply/{project_id}")
+def apply_run_to_project(run_id: str, project_id: str) -> dict[str, Any]:
+    """"Use this output": make a lab run's notes the project's active
+    transcription. Only allowed when the run's audio genuinely came from
+    that project — comparing engines is safe and read-only, but adopting a
+    result is a real, explicit action with a real effect."""
+    run = lab_storage.load_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found.")
+    project = project_storage.load_project(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    if run.get("error"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"This run failed ({run['error']}) — there's no usable output to apply.",
+        )
+    source = run.get("source") or {}
+    if source.get("kind") != "project" or source.get("project_id") != project_id:
+        raise HTTPException(
+            status_code=400,
+            detail="This run wasn't made from this project's own audio — only a run "
+            "started from \"An existing project's audio\" for this exact project can "
+            "become its active transcription.",
+        )
+
+    notes = sorted(run["notes"], key=lambda n: (n["start_time"], n["pitch"]))
+    is_poly = any(n.get("group") for n in notes)
+    data = {
+        "project_id": project.id,
+        "project_name": project.name,
+        "source_audio": project.audio_filename,
+        "generated_at": project_storage.now_iso(),
+        "note_count": len(notes),
+        "notes": notes,
+        # Applying a different engine's output is a new transcription, not
+        # an edit — manual chord markers reset, same as a fresh transcribe.
+        "chords": [],
+        "detection": "poly" if is_poly else "melody",
+        "detection_note": None,
+        "engine_used": run["engine_key"],
+        "routing_mode": "multiple_notes" if is_poly else "melody_only",
+        "fallback_reason": None,
+        "warnings": list(run.get("messages", [])),
+        "difficulty": describe_difficulty(notes, run.get("messages", []), run["engine_key"]),
+    }
+
+    json_path = project_storage.transcription_json_path(project.id)
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    json_path.write_text(json.dumps(data, indent=2))
+    write_midi_from_notes(notes, project_storage.midi_path(project.id))
+    # "Reset to original transcription" should reset back to THIS applied
+    # result, not whatever ran before — same snapshot POST /transcribe takes.
+    shutil.copyfile(json_path, project_storage.original_transcription_json_path(project.id))
+
+    project.note_detection = "poly" if is_poly else "melody"
+    project.note_count = len(notes)
+    project.status = "transcribed"
+    project.error = None
+    project.updated_at = project_storage.now_iso()
+    project_storage.save_project(project)
+
+    return data
 
 
 @router.get("/runs/{run_id}/download/midi")

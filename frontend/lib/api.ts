@@ -83,6 +83,18 @@ export interface NotesResponse {
   detection?: string | null;
   /** Honest caveat about the detection (fallbacks, simplifications). */
   detection_note?: string | null;
+  // v0.9.5 smart routing status — always present, never hidden, so the
+  // owner can see exactly which engine ran and why.
+  /** Which detector actually produced these notes: "basic_pitch" | "cqt" | "pyin". */
+  engine_used?: string | null;
+  /** The resolved mode: "melody_only" | "multiple_notes" | "double_stops". */
+  routing_mode?: string | null;
+  /** Set only when a poly request degraded to a different engine. */
+  fallback_reason?: string | null;
+  /** Engine messages + instrument-specific cautions (guitar/violin, etc). */
+  warnings?: string[];
+  /** Rough density read: "Simple melody" | "Some overlapping notes" | "Dense piano/audio — may need editing" | "No notes detected". */
+  difficulty?: string | null;
 }
 
 /**

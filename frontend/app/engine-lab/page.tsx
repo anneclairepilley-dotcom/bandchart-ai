@@ -9,6 +9,7 @@ import {
   LabSources,
   RunResult,
   RunSource,
+  applyRunToProject,
   fixtureAudioUrl,
   listEngines,
   listFixtures,
@@ -52,6 +53,9 @@ export default function EngineLabPage() {
   const [runError, setRunError] = useState<string | null>(null);
   const [runs, setRuns] = useState<RunResult[]>([]);
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
+  const [applyingRunId, setApplyingRunId] = useState<string | null>(null);
+  const [appliedRunId, setAppliedRunId] = useState<string | null>(null);
+  const [applyError, setApplyError] = useState<string | null>(null);
 
   const refreshLists = useCallback(() => {
     let cancelled = false;
@@ -125,6 +129,20 @@ export default function EngineLabPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedEngine, sourceKind, selectedFixture, selectedProject, uploadedAudioId]);
 
+  const handleApply = useCallback(async (run: RunResult) => {
+    if (run.source.kind !== "project" || !run.source.project_id) return;
+    setApplyingRunId(run.run_id);
+    setApplyError(null);
+    try {
+      await applyRunToProject(run.run_id, run.source.project_id);
+      setAppliedRunId(run.run_id);
+    } catch (err) {
+      setApplyError(err instanceof ApiError ? err.message : "Applying this output failed.");
+    } finally {
+      setApplyingRunId(null);
+    }
+  }, []);
+
   return (
     <main className="mx-auto max-w-4xl px-4 py-8">
       <div className="mb-6 flex items-center justify-between">
@@ -132,8 +150,10 @@ export default function EngineLabPage() {
           <h1 className="text-2xl font-semibold">Engine Lab</h1>
           <p className="mt-1 text-sm text-gray-600">
             A developer tool for comparing transcription engines on the same
-            audio. This is separate from the main app — nothing here touches
-            a real project&apos;s transcription.
+            audio. Running engines here is separate from the main app and
+            never affects a project — the one exception is the explicit
+            &quot;Use this output&quot; button, which is the only way a lab
+            result becomes a project&apos;s active transcription.
           </p>
         </div>
         <Link href="/" className="shrink-0 text-sm text-blue-700 underline hover:text-blue-900">
@@ -333,6 +353,11 @@ export default function EngineLabPage() {
               Clear list
             </button>
           </div>
+          {applyError && (
+            <p className="mb-3 rounded border border-red-200 bg-red-50 p-2 text-sm text-red-700">
+              {applyError}
+            </p>
+          )}
           <div className="overflow-x-auto">
             <table className="w-full min-w-[720px] text-left text-sm">
               <thead>
@@ -346,6 +371,7 @@ export default function EngineLabPage() {
                   <th className="p-2">Pitch range</th>
                   <th className="p-2">Score</th>
                   <th className="p-2">Downloads</th>
+                  <th className="p-2">Use output</th>
                 </tr>
               </thead>
               <tbody>
@@ -386,10 +412,37 @@ export default function EngineLabPage() {
                           JSON
                         </a>
                       </td>
+                      <td className="p-2">
+                        {run.source.kind === "project" ? (
+                          appliedRunId === run.run_id ? (
+                            <span
+                              className="text-xs font-medium text-green-700"
+                              data-testid={`applied-${run.run_id}`}
+                            >
+                              ✓ Applied
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleApply(run);
+                              }}
+                              disabled={applyingRunId === run.run_id || !!run.error}
+                              data-testid={`apply-run-${run.run_id}`}
+                              className="rounded border border-blue-300 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {applyingRunId === run.run_id ? "Applying…" : "Use this output"}
+                            </button>
+                          )
+                        ) : (
+                          <span className="text-xs text-gray-400">—</span>
+                        )}
+                      </td>
                     </tr>
                     {expandedRunId === run.run_id && (
                       <tr className="border-b border-gray-200 bg-gray-50">
-                        <td colSpan={9} className="p-3">
+                        <td colSpan={10} className="p-3">
                           {run.error && (
                             <p className="mb-2 rounded border border-red-200 bg-red-50 p-2 text-sm text-red-700">
                               {run.error}
