@@ -18,15 +18,15 @@ Two detection engines are on board (v0.9.3):
   one long note (a loudness re-attack check finds the re-strikes), and clearly
   low-confidence detections are dropped (with a message, and never to the point of
   emptying a quiet recording).
-- **Simple polyphonic / chords (experimental)**: Spotify's open-source
+- **Basic Pitch / multiple notes**: Spotify's open-source
   [Basic Pitch](https://github.com/spotify/basic-pitch) model (ICASSP 2022) — a real
   learned transcription model that hears several notes at once. It runs on CPU through its
   bundled ONNX network (no TensorFlow, no GPU, no accounts, nothing paid — the model ships
-  inside the pip package). Detected notes carry a velocity (loudness) and simultaneous
-  notes share a chord group id like `"chord_1"` in the JSON. If the model isn't installed
-  or fails, the app quietly falls back to the built-in v0.9.2 CQT detector, and if THAT
-  finds nothing usable it falls back to melody-only — always with an honest message, never
-  a crash.
+  inside the pip package). Detected notes carry a velocity (loudness), a `"source":
+  "basic_pitch"` tag and simultaneous notes share a chord group id like `"chord_1"` in
+  the JSON. If the model isn't installed or fails, the app quietly falls back to the
+  built-in v0.9.2 CQT detector, and if THAT finds nothing usable it falls back to
+  melody-only — always with an honest message, never a crash.
 
 **What it does:**
 - **Clean home screen** (v0.9.1): "Turn sound into sheet music" — upload an audio file
@@ -93,9 +93,9 @@ Two detection engines are on board (v0.9.3):
   the nearest note — playback continues from there if playing, stays put if paused, and
   a click while stopped sets where the next Play begins. The note timeline (piano roll),
   the tab columns and the note-table rows are clickable too
-- **Simple polyphonic / chords detection** (v0.9.2, upgraded in v0.9.3): the "Note
-  detection" advanced setting — Melody only (default) or **Simple polyphonic / chords**
-  (experimental; picked automatically for Piano + Direct transcription). v0.9.3 replaces
+- **Multiple-note detection** (v0.9.2, upgraded in v0.9.3): the "Note
+  detection" advanced setting — Melody only (default) or **Basic Pitch / multiple notes**
+  (picked automatically for Piano + Direct transcription). v0.9.3 replaces
   the primary engine with Spotify's **Basic Pitch** model (ONNX, CPU) — real learned
   polyphonic transcription with up to 4 simultaneous notes kept per moment. Simultaneous
   notes are grouped into chord events (`"group": "chord_1"` in the JSON, with a
@@ -220,7 +220,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
 pip install -r requirements.txt
-pip install --no-deps basic-pitch
+pip install --no-deps basic-pitch==0.4.0
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 (The `--no-deps` line installs the Basic Pitch note-detection model used by polyphonic
@@ -269,7 +269,7 @@ cd backend
 python3 -m venv .venv
 source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-pip install --no-deps basic-pitch   # optional: the polyphonic-mode model (see note above)
+pip install --no-deps basic-pitch==0.4.0   # optional: the polyphonic-mode model (see note above)
 uvicorn app.main:app --reload --port 8000
 ```
 
@@ -302,7 +302,7 @@ else.
    `.musicxml` and `.pdf` files
 
 > **Updating from an older version?** After `git pull`, run
-> `pip install -r requirements.txt` and `pip install --no-deps basic-pitch` in the backend
+> `pip install -r requirements.txt` and `pip install --no-deps basic-pitch==0.4.0` in the backend
 > once more (with the virtual environment active) — newer versions add libraries (music21
 > for MusicXML, verovio/cairosvg/pypdf for PDF export, onnxruntime + Basic Pitch for
 > v0.9.3's polyphonic detection).
@@ -485,6 +485,18 @@ happens you'll see: *"YouTube blocked this cloud server from downloading the aud
    own storage folder, never the app itself or your other projects
 
 ## Troubleshooting
+
+**`No module named 'pkg_resources'` when running Basic Pitch.** Fresh Python 3.12
+environments no longer include setuptools (which provides `pkg_resources`) by default.
+It's now in `requirements.txt`, so run `pip install -r requirements.txt` again (or
+`pip install setuptools`) inside the backend venv.
+
+**`module 'scipy.signal' has no attribute 'gaussian'` from Basic Pitch.** This happens
+when pip installed an OLD basic-pitch (it backtracks through ancient versions while
+trying to satisfy basic-pitch's declared TensorFlow dependency). Old versions call a
+scipy function that modern scipy removed. Fix: install the pinned version without its
+declared dependencies — `pip install --no-deps basic-pitch==0.4.0` — which uses the
+current scipy API and runs on onnxruntime. No scipy downgrade needed.
 
 **Mac setup said the optional PDF engine (verovio) couldn't be installed.** Setup still
 completes and everything else works — transcription, YouTube import, the in-browser sheet

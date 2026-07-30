@@ -50,6 +50,9 @@ class Note(BaseModel):
     # True on a repeated note the melody detector split off at a re-strike —
     # tells the notation cleanup never to glue it back onto its predecessor.
     reattack: Optional[bool] = None
+    # Which detector produced this note: "basic_pitch", "cqt" or "pyin"
+    # (absent on notes from before v0.9.3 and on hand-added notes).
+    source: Optional[str] = Field(None, max_length=16)
 
 
 class NotesUpdate(BaseModel):

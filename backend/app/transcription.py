@@ -165,6 +165,7 @@ def _detect_notes(audio_path: Path) -> tuple[list[dict[str, Any]], list[str]]:
             "start_time": round(note["start"], 4),
             "duration": round(duration, 4),
             "confidence": round(float(np.mean(note["confidences"])), 4),
+            "source": "pyin",
         }
         if note.get("reattack"):
             assembled["reattack"] = True

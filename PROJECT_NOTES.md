@@ -303,6 +303,17 @@ The whole version went into note detection; weak side features were parked.
   audio is too dense for the current model." (when ≥half the chord moments overflow)
 - setup.command installs basic-pitch (--no-deps) with a friendly fallback note;
   README documents the extra pip line for Codespaces/manual setups
+- **Follow-up round (owner's Mac findings + label change)**: basic-pitch PINNED
+  to ==0.4.0 everywhere (setup.command, README) — the owner's Terminal errors
+  ("No module named pkg_resources", "scipy.signal has no attribute 'gaussian'")
+  come from pip backtracking to ANCIENT basic-pitch versions while resolving
+  its TensorFlow dep; 0.4.0 uses scipy.signal.windows.gaussian (current API) so
+  NO scipy pin is needed — verified working with scipy 1.18. setuptools added
+  to requirements.txt (provides pkg_resources; missing from fresh 3.12 venvs).
+  UI label renamed to "Basic Pitch / multiple notes"; notice wording is now
+  "Multiple-note detection works best with clear piano or simple chords. Dense
+  songs may still need editing." Every note carries "source":
+  "basic_pitch"|"cqt"|"pyin" (optional Note field, survives PUT round-trips)
 
 ### v0.9.2 — readability, click-to-seek, experimental polyphony (done)
 - **Contrast sweep**: dim grays lifted one step app-wide (text-gray-400/500 → 600,

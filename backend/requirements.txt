@@ -11,9 +11,15 @@ cairosvg
 pypdf
 yt-dlp
 # v0.9.3 polyphonic detection (Basic Pitch runs on these via ONNX, CPU only).
-# basic-pitch itself is installed separately with --no-deps (see setup.command
-# and the README) because its declared dependencies pin an old TensorFlow that
-# doesn't install on Python 3.12 — the ONNX model needs none of that.
+# basic-pitch itself is installed separately, pinned, with --no-deps (see
+# setup.command and the README): `pip install --no-deps basic-pitch==0.4.0`.
+# Why: letting pip resolve basic-pitch's declared dependencies pulls in an old
+# TensorFlow (uninstallable on Python 3.12) or backtracks to an ancient
+# basic-pitch that still calls the removed scipy.signal.gaussian API. 0.4.0
+# uses the current scipy API and runs on onnxruntime alone.
 onnxruntime
 resampy
 mir_eval
+# Provides pkg_resources, which some packages still import at runtime on Mac
+# (fresh Python 3.12 venvs no longer include it by default).
+setuptools
