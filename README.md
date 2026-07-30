@@ -2,11 +2,20 @@
 
 AI music arranging and rehearsal app that turns songs into editable lead sheets, solo sheets, band charts and custom arrangements.
 
-## v0.9.5 — Smart transcription routing
+## v1.0 — Solo Arrangement for real songs
 
 This is the smallest possible working prototype: a local web app where you upload an audio
 file and the backend runs **real audio-to-pitch transcription**. Everything runs on your own
 computer — no accounts, no payments, no cloud services, no data leaves your machine.
+
+v1.0 gives **Solo Arrangement** its own pipeline for full pop/rock songs, instead of
+running the same single-line detector used for a clean solo recording: it tries to find
+the main melody (the vocal, when it can isolate one) and turn it into a playable solo
+part for your chosen instrument, with a small number of optional supporting notes for
+Piano and Guitar. It does not promise perfect full-band transcription — it's an
+arrangement, meant to be checked and edited, not a magic wand. See **Solo Arrangement**
+below for full details, including what real vocal isolation (Demucs) would take and why
+it's document-only rather than active in this environment.
 
 v0.9.5 uses what the Engine Lab found (v0.9.4) to make BandChart choose transcription
 settings automatically instead of leaving it all to guesswork: which engine to try, how many
@@ -144,17 +153,107 @@ Two detection engines are selectable in the main app (v0.9.3):
   **Experimental tools** at the bottom of the project page instead of cluttering the
   main flow. Proper Ultimate Guitar-style chord sheets are a much later feature,
   probably v5.0
+- **Solo Arrangement for real songs** (v1.0): choosing **Solo arrangement** now runs its
+  own pipeline instead of the plain single-line detector — it tries to isolate the vocal
+  and build the solo part from that (falling back to the full mix, honestly, when it
+  can't), and for Piano/Guitar can add a small number of simple supporting notes. New
+  **Arrangement focus** (Main melody / Melody + simple support / Piano-style
+  arrangement) and **Arrangement difficulty** (Easy / Medium) controls appear in
+  Advanced settings when Solo arrangement is selected. See **Solo Arrangement** below
 - **Delete projects**: a Delete button beside each project on the dashboard removes the
   project with its uploaded audio and generated files, after a confirmation prompt
 
 **Explicitly out of scope so far:** accounts, payments, full band charts, rehearsal packs,
-complex editing, stem separation, drums, automatic chord detection from recordings (the
-parked chord tools are manual markers plus rough melody-based suggestions; Ultimate
-Guitar-style chord sheets are a much later feature, probably v5.0), accurate transcription
-of complex piano pieces or full-band mixes (polyphonic detection is experimental and for
-clear, simple material — the best results still come from clear recordings of one
-instrument), strummed guitar chord shapes/diagrams, full guitar/bass extraction from mixed
-songs (tab stays melody-first).
+complex editing, drums, automatic chord detection from recordings (the parked chord tools
+are manual markers plus rough melody-based suggestions; Ultimate Guitar-style chord
+sheets are a much later feature, probably v5.0), accurate transcription of complex piano
+pieces or full-band mixes (polyphonic detection is experimental and for clear, simple
+material), strummed guitar chord shapes/diagrams, full guitar/bass extraction from mixed
+songs (tab stays melody-first). **Source separation (Demucs)** exists in the code as an
+optional adapter (v1.0) but is not installed by default and is not active in the hosted
+environments this app has been tested in — see **Solo Arrangement** below; it never
+promises perfect vocal isolation or perfect full-band transcription.
+
+---
+
+## Solo Arrangement (v1.0)
+
+Solo Arrangement is for turning a **full song** into a playable solo part — different
+from Direct transcription, which is for a clean recording of one instrument or voice.
+Instead of running the same single-line pYIN/Basic Pitch pass on the whole mixed song,
+Solo Arrangement:
+
+1. Cleans up the audio (normalises volume, trims silence) into a scratch copy — your
+   original upload is never touched
+2. Tries to isolate the vocal from the rest of the mix (optional — see Demucs below).
+   Everyone except Bass uses the vocal stem for their main melody when one was isolated
+   (Bass follows the accompaniment/full mix instead — a bass part follows the low end of
+   the song, not the singer)
+3. Extracts the main melody with the same pYIN/Basic Pitch engines the rest of the app
+   uses, cleaned up the same way (tiny ghost notes removed, pitch jitter smoothed,
+   rhythm quantized for readability)
+4. For **Piano and Guitar only**, when you ask for it (Arrangement focus below), adds a
+   small number of simple low-register supporting notes — never a full reduction of
+   everything detected, just enough for a left hand or a bass note under the melody
+5. Feeds the result into the same sheet music / TAB / MIDI / JSON / MusicXML / PDF / Play
+   Along / note editor as everything else
+
+**New Arrangement controls** (Advanced settings, only shown for Solo arrangement):
+- **Arrangement focus**: *Main melody* (default) — melody only, no extra notes; *Melody +
+  simple support* — adds the sparse support notes described above (Piano/Guitar only);
+  *Piano-style arrangement* — same, but always aims for a fuller left hand on Piano
+- **Arrangement difficulty**: *Easy* (default) — fewer, more spaced-out support notes;
+  *Medium* — more of them, closer together
+
+**Honest status, every time** — a blue status block under the audio player, shown only
+for Solo arrangement projects, alongside the existing engine status:
+```
+Mode: Solo arrangement
+Source: vocal stem / full mix / accompaniment
+Engine: pYIN / Basic Pitch / Demucs + Basic Pitch
+Arrangement focus: Main melody / Melody + support
+Warnings: Dense audio may need editing
+```
+You'll also see one of these exact messages depending on what happened: *"Solo
+Arrangement finds the strongest melody and creates a playable part. Dense songs may need
+editing."* (always), *"Using vocal stem for main melody."* (isolation worked), *"Using
+full mix because no clear vocal stem was isolated."* (it didn't — this is the normal case
+in the hosted environments this app has been tested in, see below), and *"Added simple
+support notes. Please check and edit."* (when support notes were added).
+
+### Vocal isolation (Demucs) — investigated, document-only for now
+
+Solo Arrangement supports real vocal/accompaniment separation via Meta's
+[Demucs](https://github.com/facebookresearch/demucs) in code (`backend/app/separation.py`),
+but it is **not installed by default** and is not active in GitHub Codespaces or this
+project's other tested environments. Two things stack against it there:
+1. Demucs depends on PyTorch. Only the default (GPU-oriented) PyPI wheel is reachable in
+   those environments — installing it pulls in several gigabytes of unused CUDA packages
+   even though there's no GPU to use them
+2. Demucs' pretrained model checkpoint downloads from `dl.fbaipublicfiles.com` (or
+   `huggingface.co` as a fallback) — both are blocked outright on some networks
+
+If neither of those is a problem on your machine (a Mac with a fast connection, most
+likely), you can try it yourself: `pip install demucs` in the backend's virtual
+environment (it is deliberately **not** in `requirements.txt`, so it never installs
+automatically or bloats a normal setup). Once installed, Solo Arrangement will detect and
+use it automatically — no code changes or settings needed — and the status block will
+show "Source: vocal stem" and "Demucs" in the Engine line. If it's missing, fails to
+download its model, or errors in any way, the app **always** falls back to the full mix
+and says so — it never crashes and never silently pretends separation happened.
+
+**Without Demucs**, Solo Arrangement still works — pYIN/Basic Pitch run on the full mix
+instead of an isolated vocal. On a typically-mixed pop song (vocals mixed forward, which
+is normal production practice) this still finds the melody reasonably well. On a
+bass-forward or dense mix it can mistrack — for example latching onto a strong bassline
+instead of the vocal. **Bass arrangements are the instrument hit hardest by this**:
+without separation, Bass gets the same full-mix melody pass as everything else (usually
+the vocal line), not a genuine bassline — expect to edit it more than other instruments.
+
+**What this is not**: BandChart AI does not claim to perfectly separate every instrument,
+and Solo Arrangement does not claim to perfectly transcribe a full band. It finds the
+strongest melody it can and builds a playable, editable starting point — dense songs will
+need checking and cleanup, honestly flagged every time.
 
 ---
 
@@ -732,7 +831,7 @@ All endpoints are under `/api`.
 | GET | `/projects/{id}` | Get one project |
 | POST | `/projects/{id}/audio` | Upload audio (multipart field `file`) |
 | POST | `/projects/{id}/youtube` | Import audio from a YouTube URL — `{"url": string, "rights_confirmed": true}` |
-| POST | `/projects/{id}/settings` | Save the setup choices — `{"instrument", "mode", "time_signature", "key_signature", "rhythm_detail"}` |
+| POST | `/projects/{id}/settings` | Save the setup choices — `{"instrument", "mode", "time_signature", "key_signature", "rhythm_detail", "note_detection", "arrangement_focus", "arrangement_difficulty"}` (the last two are v1.0, ignored by Direct transcription) |
 | POST | `/projects/{id}/transcribe` | Run transcription on the uploaded audio |
 | GET | `/projects/{id}/notes` | Get the detected-notes JSON |
 | GET | `/projects/{id}/audio` | Stream the original uploaded audio |
@@ -764,6 +863,13 @@ when a Multiple-notes request degraded to a different engine, else `null`), `war
 (a list of strings — engine messages plus any instrument-specific caution), and
 `difficulty` (a rough density read, one of `"Simple melody"`, `"Some overlapping
 notes"`, `"Dense piano/audio — may need editing"`, `"No notes detected"`).
+
+For Solo Arrangement projects (v1.0), it additionally carries: `arrangement_source`
+(`"vocal_stem"` | `"accompaniment"` | `"full_mix"`), `separation_engine` (`"demucs"` or
+`null`), `arrangement_focus` (`"main_melody"` | `"melody_support"` | `"piano_style"`),
+and `arrangement_difficulty` (`"easy"` | `"medium"`) — `null`/absent for Direct
+transcription projects. Support notes added for Piano/Guitar carry `"source":
+"accompaniment"` on the Note object.
 
 ### Engine Lab endpoints (v0.9.4, separate from the main pipeline)
 

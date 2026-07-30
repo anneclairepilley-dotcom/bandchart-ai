@@ -36,6 +36,10 @@ export interface Project {
   key_signature?: string | null;
   rhythm_detail?: "readable" | "precise" | null;
   note_detection?: "melody" | "poly" | null;
+  // v1.0 Solo Arrangement controls (absent/null on older projects, and
+  // ignored by Direct transcription).
+  arrangement_focus?: "main_melody" | "melody_support" | "piano_style" | null;
+  arrangement_difficulty?: "easy" | "medium" | null;
 }
 
 /** Pre-transcription choices saved via POST /projects/{id}/settings. */
@@ -46,6 +50,8 @@ export interface ProjectSettingsPayload {
   key_signature: string;
   rhythm_detail: "readable" | "precise";
   note_detection: "melody" | "poly";
+  arrangement_focus: "main_melody" | "melody_support" | "piano_style";
+  arrangement_difficulty: "easy" | "medium";
 }
 
 export interface Note {
@@ -95,6 +101,14 @@ export interface NotesResponse {
   warnings?: string[];
   /** Rough density read: "Simple melody" | "Some overlapping notes" | "Dense piano/audio — may need editing" | "No notes detected". */
   difficulty?: string | null;
+  // v1.0 Solo Arrangement status — present only when this project's mode is
+  // "solo_arrangement"; always reported, never hidden.
+  /** What fed the main melody: "vocal_stem" | "accompaniment" | "full_mix". */
+  arrangement_source?: string | null;
+  /** Which source-separation engine ran, if any: "demucs" or null. */
+  separation_engine?: string | null;
+  arrangement_focus?: "main_melody" | "melody_support" | "piano_style" | null;
+  arrangement_difficulty?: "easy" | "medium" | null;
 }
 
 /**

@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
 from app import storage
+from app.arrangement import run_solo_arrangement
 from app.chords import (
     CHORD_NAME_HELP,
     KEY_CHOICES,
@@ -66,6 +67,8 @@ VALID_MODES = {"direct_transcription", "solo_arrangement"}
 VALID_TIME_SIGNATURES = {"predict", "4/4", "3/4", "6/8"}
 VALID_RHYTHM_DETAILS = {"readable", "precise"}
 VALID_NOTE_DETECTIONS = {"melody", "poly"}
+VALID_ARRANGEMENT_FOCUSES = {"main_melody", "melody_support", "piano_style"}
+VALID_ARRANGEMENT_DIFFICULTIES = {"easy", "medium"}
 # Quarter notes per bar at the fixed 120 BPM (0.5s per quarter).
 _BAR_SECONDS = {"4/4": 2.0, "3/4": 1.5, "6/8": 1.5}
 
@@ -126,12 +129,26 @@ def set_project_settings(project_id: str, body: ProjectSettings) -> Project:
             detail=f"'{body.note_detection}' isn't a note detection option. "
             "Choose Melody only, or Allow simple chords / multiple notes.",
         )
+    if body.arrangement_focus not in VALID_ARRANGEMENT_FOCUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{body.arrangement_focus}' isn't an arrangement focus option. "
+            "Choose Main melody, Melody + simple support, or Piano-style arrangement.",
+        )
+    if body.arrangement_difficulty not in VALID_ARRANGEMENT_DIFFICULTIES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{body.arrangement_difficulty}' isn't an arrangement difficulty "
+            "option. Choose Easy or Medium.",
+        )
     project.instrument = body.instrument
     project.mode = body.mode
     project.time_signature = body.time_signature
     project.key_signature = body.key_signature
     project.rhythm_detail = body.rhythm_detail
     project.note_detection = body.note_detection
+    project.arrangement_focus = body.arrangement_focus
+    project.arrangement_difficulty = body.arrangement_difficulty
     project.updated_at = storage.now_iso()
     storage.save_project(project)
     return project
@@ -347,17 +364,31 @@ def transcribe(project_id: str) -> Project:
     storage.save_project(project)
 
     try:
-        result = run_transcription(
-            audio_path=audio_path,
-            midi_out_path=storage.midi_path(project_id),
-            json_out_path=storage.transcription_json_path(project_id),
-            project_id=project.id,
-            project_name=project.name,
-            source_audio_filename=project.audio_filename,
-            detection=project.note_detection or "melody",
-            instrument=project.instrument or "concert",
-            mode=project.mode or "direct_transcription",
-        )
+        if (project.mode or "direct_transcription") == "solo_arrangement":
+            result = run_solo_arrangement(
+                audio_path=audio_path,
+                midi_out_path=storage.midi_path(project_id),
+                json_out_path=storage.transcription_json_path(project_id),
+                project_id=project.id,
+                project_name=project.name,
+                source_audio_filename=project.audio_filename,
+                instrument=project.instrument or "concert",
+                note_detection=project.note_detection or "melody",
+                arrangement_focus=project.arrangement_focus or "main_melody",
+                arrangement_difficulty=project.arrangement_difficulty or "easy",
+            )
+        else:
+            result = run_transcription(
+                audio_path=audio_path,
+                midi_out_path=storage.midi_path(project_id),
+                json_out_path=storage.transcription_json_path(project_id),
+                project_id=project.id,
+                project_name=project.name,
+                source_audio_filename=project.audio_filename,
+                detection=project.note_detection or "melody",
+                instrument=project.instrument or "concert",
+                mode=project.mode or "direct_transcription",
+            )
     except Exception as exc:  # noqa: BLE001
         message = _friendly_transcription_error(exc)
         project.status = "failed"
@@ -418,6 +449,12 @@ def _save_working_notes(project: Project, notes: list[dict]) -> dict:
         "fallback_reason": None,
         "warnings": [],
         "difficulty": None,
+        # v1.0 Solo Arrangement status — a note edit or reset never changes
+        # which source/engine produced the original arrangement.
+        "arrangement_source": None,
+        "separation_engine": None,
+        "arrangement_focus": None,
+        "arrangement_difficulty": None,
     }
     json_path = storage.transcription_json_path(project.id)
     if json_path.exists():
