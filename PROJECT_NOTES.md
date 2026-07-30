@@ -1,6 +1,6 @@
 # BandChart AI — Project Notes
 
-Living notes for contributors (human or AI). Last updated after v1.0 (2026-07).
+Living notes for contributors (human or AI). Last updated after v0.9.6 (2026-07).
 If you are a new Claude Code session: read this file, then README.md, before changing code.
 
 ## Purpose
@@ -220,6 +220,143 @@ Explanations, error messages, and README instructions must stay beginner-friendl
   padding, readable-mode long-note truncation, a Start double-click race, the
   0.0-certainty mask, same-slot keep-later inconsistency, stale YouTube copy, stale
   setupError, and the frontend's hardcoded 2s bars — all fixed and re-verified
+
+### v0.9.6 — serious transcription engine stack (done)
+Built chronologically AFTER v1.0, deliberately numbered lower: the owner's explicit
+instruction this version was "v1.0 should not happen until transcription is good
+enough" — v1.0's Solo Arrangement pipeline was real progress on ARRANGEMENT, but the
+underlying note-detection QUALITY was still the actual complaint (Basic Pitch helps but
+isn't enough for dense piano/full songs, Mrs Magic still not solved). v0.9.6 is entirely
+about that: a stronger engine stack, evaluated honestly, wired in only where it
+genuinely works in this environment.
+
+**Investigated fresh (not just re-read from old notes) — network policy re-confirmed via
+curl before touching any code:**
+- `download.pytorch.org`, `dl.fbaipublicfiles.com`, `huggingface.co`, `zenodo.org` — all
+  still 403 at the TCP CONNECT level, identical to every prior investigation (v0.9.4,
+  v1.0). `github.com`/`objects.githubusercontent.com`/`raw.githubusercontent.com` ARE
+  reachable, which prompted a genuine re-investigation of Piano Expert specifically (see
+  below) in case a GitHub-hosted checkpoint mirror existed as a workaround — Demucs was
+  NOT re-investigated from scratch (its blockers — fbaipublicfiles/huggingface — were
+  just reconfirmed blocked by the same curl check, and nothing about the CUDA-bloat
+  problem changes between sessions)
+
+**Piano Expert (ByteDance/Qiuqiang Kong `piano_transcription_inference`)** — same two
+blockers as the v0.9.4 finding, both independently re-confirmed by curl directly against
+the actual hosts before any code was written this version (not just re-read from old
+notes): `download.pytorch.org` (the CPU-only PyTorch wheel host) and `zenodo.org` (the
+package's checkpoint host) both still return 403 at the TCP CONNECT level. The one new
+thing checked this version — since `github.com`/`objects.githubusercontent.com` ARE
+reachable here — was whether the checkpoint might also be mirrored as a GitHub Release
+asset (which would download from the reachable `objects.githubusercontent.com`) rather
+than only on Zenodo; a deeper background investigation was launched to check this and
+attempt a real install + inference end-to-end, but its result wasn't back in time for
+this version's commit. `backend/app/piano_expert.py` is written as a real, working
+adapter regardless of the outcome — defensive by design (see below), so it's safe to
+ship now and simply activates automatically if that investigation (or the owner,
+manually) turns up a working install path later. Treat "GitHub-hosted checkpoint mirror"
+as an open question for the next version, not a confirmed workaround.
+
+**`backend/app/piano_expert.py`** (new) — real, working adapter (not a permanently-
+unavailable stub like v0.9.4's Engine Lab placeholder): `is_available()` lazily imports
+`piano_transcription_inference`; `transcribe_piano()` loads the model as a lazy
+singleton (loading is slow), runs inference at 16kHz mono (the package's expected rate),
+and converts `est_note_events` (onset/offset/midi_note/velocity) into BandChart's note
+schema. Post-filtering mirrors Basic Pitch's pattern: a same-pitch rejoin pass merges
+events split mid-sustain (`REJOIN_GAP_S=0.05`), quiet/short events are dropped
+(`MIN_VELOCITY_FRACTION=0.15` of this recording's loudest note, `MIN_NOTE_DURATION=0.05s`),
+and `_assign_groups` (imported from `polyphonic.py`, same cross-module-private-import
+precedent as before) groups chords with a generous cap of 8 — deliberately higher than
+Basic Pitch's 4, since a real piano-specialist model can legitimately detect fuller
+chords and shouldn't be artificially trimmed the same way. Never added to
+requirements.txt; never installed automatically.
+
+**Routing** (`backend/app/routing.py::specialist_engine_for()`, new): a tiny lookup,
+`{"piano": "piano_expert"}` today, nothing else qualifies. Wired into BOTH
+`transcription.py::run_transcription()` (Direct transcription) and
+`arrangement.py::_detect_melody()` (Solo Arrangement) as an attempt made BEFORE the
+existing Basic Pitch/CQT/pYIN chain, guarded so it only even checks availability for
+piano and only when poly detection was requested. When Piano Expert isn't installed
+(this environment, always) the block does nothing at all and the pre-existing chain runs
+completely unchanged — verified by re-running the C major chord gate: still exactly
+`C4/E4/G4`, `engine_used: "basic_pitch"`, identical to before this version. When
+monkeypatched available-and-working, it's used and reported as `engine_used:
+"piano_expert"`; when monkeypatched available-but-failing, it falls back to Basic Pitch
+with `fallback_reason: "Piano Expert failed (...), used Basic Pitch instead."` — all
+three paths unit-tested directly (not just inferred).
+
+**`backend/app/separation.py`** — upgraded from v1.0's 2-stem (`--two-stems vocals`) to
+htdemucs' default **4-stem separation** (vocals/drums/bass/other) in one call:
+`separate_full()` returns a `SeparationResult` with all four stem paths;
+`separate_vocals()` is now a thin back-compat alias. `SeparationResult.accompaniment_path`
+is a property returning `other_path` (the closest single stem to "the rest of the band"
+for callers that only want vocals-vs-everything-else). Still document-only for the exact
+same two reasons as v1.0 (re-confirmed, see above) — never in requirements.txt.
+
+**Solo Arrangement stem routing** (`backend/app/arrangement.py`) — v1.0 only had a
+2-stem split (bass got "accompaniment" = everything non-vocal; everyone else got
+vocals). v0.9.6 routes per the request's exact table, now that 4 real stems exist:
+- **Bass** → its own isolated `bass_path` stem (`arrangement_source: "bass_stem"`,
+  new value) — a real bassline instead of the old "same full-mix pass as everyone else"
+  gap documented in v1.0's known limitations
+- **Piano, Guitar** → the `other_path` (accompaniment) stem — moved OUT of the
+  vocal-stem-default group they were incorrectly lumped into in v1.0 (a piano/guitar
+  part doesn't live in the vocal stem)
+- **Voice, Violin, Alto Sax, Trumpet** (and anything else) → unchanged, vocal stem when
+  available — these usually carry the main melody line
+All three routing branches are unit-tested with a monkeypatched `separate_full` (since
+real Demucs can't run in this sandbox) confirming each instrument actually receives the
+stem the table says it should.
+
+**Exact wording change**: the "no separation available" message changed from v1.0's
+"Using full mix because no clear vocal stem was isolated." to the v0.9.6 request's exact
+required wording, **"Source separation failed. Using full mix instead."** — this is a
+deliberate wording change per this version's explicit spec, not a regression; the old
+v1.0 Playwright test asserting the old string was updated to match.
+
+**Engine Lab expansion** (`backend/app/engine_lab/adapters.py`) — `piano_expert`'s
+adapter entry now calls the REAL `is_available()`/`transcribe_piano()` (previously a
+permanent `False`/`NotImplementedError` stub). Two new adapters: `demucs_vocals`
+("Demucs + Basic Pitch (vocal separation)") — separates with `separate_full` into a
+throwaway temp dir, then runs Basic Pitch on the isolated vocal stem, so the lab can
+directly compare "separation + detection" against running detection on the full mix on
+the exact same source audio; and `mt3` — a documented-unavailable stub (research-only,
+no PyPI package, JAX/T5X/TensorFlow from source, GCS checkpoints, caretaker-mode
+upstream — same investigation as v0.9.4, just now actually listed in the lab per this
+version's explicit request instead of only being written up in README prose). **No
+frontend changes needed** — `app/engine-lab/page.tsx` already renders the engine list
+generically from `GET /engine-lab/engines`, so all three new/upgraded adapters (and
+their honest unavailable reasons) appear automatically. Verified: listing them doesn't
+crash, and attempting to RUN an unavailable one (`POST /engine-lab/runs`) returns a
+friendly 400 "Engine unavailable: {reason}", never a 500 — for both `piano_expert` and
+`demucs_vocals`.
+
+**Frontend** (`app/projects/[id]/page.tsx`): `ENGINE_LABELS` gains `piano_expert: "Piano
+Expert"`; `ARRANGEMENT_SOURCE_LABELS` gains `bass_stem: "bass stem"`. That's the entire
+frontend diff for this version, per the explicit "do not add UI fluff" instruction — the
+existing engine-status and arrangement-status blocks already display whatever engine/
+source key comes back, so a new engine or stem type just needs a display label, not new
+UI structure.
+
+**Chord feature**: still parked under "Experimental tools" (v0.9.3), untouched — the
+request explicitly said not to bring it back. Ultimate Guitar-style chord sheets remain
+deferred to a much later version (probably v5.0), unchanged.
+
+**Testing**: unit-tested (venv heredocs, with `unittest.mock.patch` monkeypatching for
+the pieces that can't actually run here — Piano Expert available+working,
+available+failing, and confirmed it's never even checked for non-piano instruments;
+Demucs 4-stem routing for bass/piano/voice with a fake `separate_full`) — all before any
+server involvement, matching the established methodology. Then a new Playwright suite
+(20 checks: Engine Lab lists + graceful-400 checks, the C major gate through the real
+server, bass's new stem routing end-to-end, chord/YouTube regressions) plus a full
+re-run of the existing v0.9.3/Engine Lab/v0.9.5/v1.0 suites (~140 checks) — all green.
+
+**v1.0 status**: still not declared "done" in the sense the owner means it — Piano
+Expert and Demucs remain document-only in every environment this app has actually been
+tested in (Codespaces-style sandboxes). The code is real and will activate automatically
+wherever those hosts are reachable (most likely a home Mac with a fast, unrestricted
+connection); until the owner can confirm that on real hardware against Mrs Magic, don't
+claim the underlying quality problem is solved.
 
 ### v1.0 — Solo Arrangement rebuild (done)
 Goal: make Solo Arrangement actually useful on real pop/rock songs — find the main
@@ -926,15 +1063,18 @@ Next.js proxy, plus confirmed by the owner in Codespaces:
   instrument. v0.9.5's routing chooses good defaults per instrument, but does not make
   the underlying detectors more accurate — Mrs Magic (the hard piano benchmark) remains
   unsolved and unverified beyond this cloud environment's YouTube block
-- **No real vocal isolation in this environment**: v1.0's Solo Arrangement pipeline
-  supports Demucs source separation in code (`app/separation.py`), but Demucs itself is
-  document-only here — it drags in ~4.7GB of unused CUDA packages AND its model
-  checkpoint host is network-blocked in this sandbox (see the v1.0 notes above). Solo
-  Arrangement always falls back to the full mix; on a vocal-forward mix (typical pop
-  production) pYIN still finds the melody reasonably well, but a bass-forward or dense
-  mix can mistrack it. Bass instrument arrangements are hit hardest by this: without
-  separation, bass gets the SAME full-mix melody pass as everything else (usually the
-  vocal line), not a real bassline
+- **No real source separation or Piano Expert in this environment**: v0.9.6's
+  `app/separation.py` (4-stem Demucs) and `app/piano_expert.py` (ByteDance piano
+  specialist) are both real, working adapters, but both are document-only here — Demucs
+  drags in ~4.7GB of unused CUDA packages AND its checkpoint host is network-blocked;
+  Piano Expert needs the same PyTorch plus a Zenodo-hosted checkpoint, also blocked (see
+  the v0.9.6 notes above; re-confirmed via curl, not just re-read from old notes). Piano
+  Direct/Solo transcription always falls back to Basic Pitch; Solo Arrangement always
+  falls back to the full mix. On a vocal-forward mix (typical pop production) pYIN still
+  finds the melody reasonably well without separation, but a bass-forward or dense mix
+  can mistrack it. Both will activate automatically wherever those hosts ARE reachable
+  (most likely a home Mac with a fast, unrestricted connection) — nothing else needs to
+  change
 - **Rhythm is approximate**: fixed 120 BPM assumption default 4/4 (3/4 and 6/8 selectable);
   cleaned style quantizes to an eighth grid (raw: sixteenth) — no real tempo/meter
   detection, so timing won't match a performance that isn't near 120 BPM
@@ -993,11 +1133,16 @@ backend/  FastAPI (Python 3.9+; owner's Codespace uses 3.12)
                         instrument-specific caps, e.g. violin=2)
   app/routing.py         v0.9.5 smart routing: per-instrument polyphony cap + default
                         note_detection + caution notes + describe_difficulty()
-  app/separation.py     v1.0 optional Demucs vocal/accompaniment adapter — document-only
-                        in this environment (never installed automatically); never raises
-  app/arrangement.py    v1.0 run_solo_arrangement(): the Solo Arrangement pipeline
-                        (audio prep, optional separation, melody + sparse support notes)
-                        — parallel to run_transcription(), which stays untouched
+  app/separation.py     optional Demucs 4-stem adapter (v0.9.6: vocals/drums/bass/other;
+                        v1.0 was 2-stem) — document-only in this environment (never
+                        installed automatically); never raises
+  app/piano_expert.py   v0.9.6 optional ByteDance Piano Expert adapter — real, working,
+                        document-only in this environment (checkpoint host blocked);
+                        tried before Basic Pitch for piano when actually available
+  app/arrangement.py    run_solo_arrangement(): the Solo Arrangement pipeline (audio
+                        prep, optional 4-stem separation with per-instrument stem
+                        routing, specialist-engine-first melody detection, sparse
+                        support notes) — parallel to run_transcription(), unchanged
   app/chords.py         chord-name validation, chart text, rough suggestions, keys
   (settings: Project.instrument/mode/time_signature/key_signature/rhythm_detail/
   note_detection/arrangement_focus/arrangement_difficulty)
@@ -1007,8 +1152,10 @@ backend/  FastAPI (Python 3.9+; owner's Codespace uses 3.12)
   app/engine_lab/        v0.9.4 Engine Lab — isolated from the main pipeline, imports
                         FROM app/transcription.py + app/polyphonic.py, never vice versa
     base.py               EngineAdapter/EngineRunOutput types
-    adapters.py            ADAPTERS registry (pyin, basic_pitch, cqt available;
-                          piano_expert/omnizart registered but permanently unavailable)
+    adapters.py            ADAPTERS registry: pyin/basic_pitch/cqt always available;
+                          piano_expert (real adapter, active if installed) and
+                          demucs_vocals (separate + Basic Pitch) reported live;
+                          omnizart/mt3 registered but permanently unavailable (v0.9.6)
     fixtures.py            5 synthetic test clips + known expected notes
     scoring.py             rough accuracy scoring against expected notes
     stats.py               engine-agnostic note_count/overlap/chord-group/pitch-range

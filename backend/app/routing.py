@@ -43,6 +43,16 @@ INSTRUMENT_POLY_NOTES: dict[str, str] = {
     "violin": "Violin output is limited to melody and simple double-stops for now.",
 }
 
+# v0.9.6: instruments with a specialist engine that's tried BEFORE the
+# general polyphonic detector, when that engine is actually available.
+# Piano Expert (ByteDance) is piano-specific; nothing else qualifies.
+SPECIALIST_ENGINE_INSTRUMENTS: dict[str, str] = {"piano": "piano_expert"}
+
+
+def specialist_engine_for(instrument: str) -> Optional[str]:
+    """The specialist engine key to try first for this instrument, if any."""
+    return SPECIALIST_ENGINE_INSTRUMENTS.get(instrument)
+
 
 @dataclass(frozen=True)
 class RoutingPlan:

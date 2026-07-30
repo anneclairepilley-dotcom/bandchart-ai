@@ -11,16 +11,19 @@ something singable/playable, not dumped note-for-note.
 Pipeline:
 1. Prepare the audio (normalise, trim silence) into a scratch copy — the
    user's original upload is never touched.
-2. Try optional vocal/accompaniment separation (app/separation.py). It
-   never raises and returns None if Demucs isn't installed or fails, so
+2. Try optional 4-stem separation, vocals/drums/bass/other (app/separation.py).
+   It never raises and returns None if Demucs isn't installed or fails, so
    this step always degrades gracefully to using the full mix.
-3. Extract the main melody: the vocal stem when one was isolated (except
-   for bass, which follows the low end of the accompaniment/full mix, not
-   the singer), the full mix otherwise. Reuses the same pYIN / Basic Pitch
-   engines as Direct transcription.
+3. Extract the main melody from the instrument-appropriate stem: Bass
+   follows its own isolated bass stem; Piano/Guitar follow the "other"
+   (accompaniment) stem; everything else (Voice, Violin, Alto Sax, Trumpet)
+   usually carries the main melody in the vocal stem. Reuses the same
+   pYIN / Basic Pitch / Piano Expert engines as Direct transcription
+   (v0.9.6: Piano tries the Piano Expert specialist engine first, when
+   available, before Basic Pitch).
 4. For piano and guitar only, when the arrangement focus calls for it,
    pull a small number of sparse low-register notes from the accompaniment
-   as simple support — never a dense reduction of everything detected.
+   stem as simple support — never a dense reduction of everything detected.
 5. Merge, and report exactly what happened (source, engines, warnings) so
    the result is honest about being an arrangement, not magic.
 """
@@ -36,14 +39,19 @@ import librosa
 import soundfile as sf
 
 from app.polyphonic import MAX_POLYPHONY, _assign_groups, detect_notes_poly
-from app.routing import RoutingPlan, describe_difficulty, resolve_routing
-from app.separation import separate_vocals
+from app.routing import RoutingPlan, describe_difficulty, resolve_routing, specialist_engine_for
+from app.separation import separate_full
 from app.storage import now_iso
 from app.transcription import SAMPLE_RATE, _detect_notes, write_midi_from_notes
 
-# Bass follows the low end of the song, not the singer — its melody source
-# is the accompaniment (or full mix), never an isolated vocal stem.
-BASS_PREFERS_ACCOMPANIMENT = {"bass"}
+# v0.9.6 stem routing (4-stem Demucs: vocals/drums/bass/other). Bass follows
+# its own isolated stem — a real bassline, not the singer or a rough
+# accompaniment mix. Piano/Guitar follow "other" (the non-vocal, non-drum,
+# non-bass instrumentation — the closest stem to "piano/guitar part").
+# Everything else (Voice, Violin, Alto Sax, Trumpet, and anything unlisted)
+# usually carries the main melody in the vocal stem.
+BASS_STEM_INSTRUMENTS = {"bass"}
+ACCOMPANIMENT_STEM_INSTRUMENTS = {"piano", "guitar"}
 # Instruments with an obvious home for a second, supporting voice (piano's
 # left hand, guitar's lower strings). Everything else stays melody-only —
 # adding harmony notes to e.g. a single-line violin/sax/trumpet/voice part
@@ -87,10 +95,11 @@ def _detect_melody(
 ) -> tuple[
     list[dict[str, Any]], str, str, Optional[str], list[str], RoutingPlan
 ]:
-    """The same engine dispatch as transcription.run_transcription (Basic
-    Pitch/CQT for "poly", pYIN otherwise, with the same fallback rules) —
-    just run on a caller-chosen source (a vocal stem, accompaniment stem,
-    or the full mix) instead of always the original upload.
+    """The same engine dispatch as transcription.run_transcription (Piano
+    Expert first for piano when available, then Basic Pitch/CQT for "poly",
+    pYIN otherwise, with the same fallback rules) — just run on a
+    caller-chosen source (a vocal/bass/accompaniment stem, or the full mix)
+    instead of always the original upload.
 
     Returns (notes, detection_used, engine_used, fallback_reason,
     engine_messages, routing_plan).
@@ -103,7 +112,28 @@ def _detect_melody(
     engine_messages: list[str] = []
     notes: Optional[list[dict[str, Any]]] = None
 
-    if note_detection == "poly":
+    # v0.9.6: same specialist-engine-first attempt as Direct transcription
+    # (currently only Piano Expert for piano) — optional, does nothing when
+    # unavailable, so Solo arrangement's existing chain is unchanged then.
+    specialist_key = specialist_engine_for(instrument) if note_detection == "poly" else None
+    if specialist_key == "piano_expert":
+        try:
+            from app.piano_expert import is_available as piano_expert_available
+            from app.piano_expert import transcribe_piano
+
+            available, _reason = piano_expert_available()
+            if available:
+                pe_notes, pe_messages = transcribe_piano(audio_path)
+                if pe_notes:
+                    notes = pe_notes
+                    detection_used = "poly"
+                    engine_used = "piano_expert"
+                    engine_messages = pe_messages
+        except Exception as exc:  # noqa: BLE001
+            notes = None
+            fallback_reason = f"Piano Expert failed ({exc}), used Basic Pitch instead."
+
+    if note_detection == "poly" and notes is None:
         try:
             notes, poly_messages = detect_notes_poly(
                 audio_path, max_polyphony=plan.max_polyphony
@@ -183,15 +213,19 @@ def run_solo_arrangement(
     """Run the Solo Arrangement pipeline on audio_path, write MIDI + notes JSON.
 
     Returns the same result shape as run_transcription, plus arrangement_source
-    ("vocal_stem" | "accompaniment" | "full_mix"), separation_engine ("demucs"
-    or None), arrangement_focus and arrangement_difficulty — so the UI can
-    show exactly what happened, never hidden.
+    ("vocal_stem" | "bass_stem" | "accompaniment" | "full_mix"),
+    separation_engine ("demucs" or None), arrangement_focus and
+    arrangement_difficulty — so the UI can show exactly what happened, never
+    hidden.
     """
     with tempfile.TemporaryDirectory(prefix="bandchart_arrangement_") as tmp:
         work_dir = Path(tmp)
         prepared_path = _prepare_audio(audio_path, work_dir)
 
-        separation_result = separate_vocals(prepared_path, work_dir)
+        # v0.9.6: full 4-stem separation (vocals/drums/bass/other) so every
+        # instrument can follow its own most-relevant stem, not just a
+        # vocals-vs-everything-else split.
+        separation_result = separate_full(prepared_path, work_dir)
         warnings: list[str] = [
             "Solo Arrangement finds the strongest melody and creates a "
             "playable part. Dense songs may need editing."
@@ -199,18 +233,23 @@ def run_solo_arrangement(
         separation_engine: Optional[str] = None
         if separation_result is not None:
             separation_engine = "demucs"
-            vocal_source = separation_result.vocals_path
-            accompaniment_source = separation_result.accompaniment_path
         else:
-            vocal_source = prepared_path
-            accompaniment_source = prepared_path
-            warnings.append("Using full mix because no clear vocal stem was isolated.")
+            warnings.append("Source separation failed. Using full mix instead.")
 
-        if instrument in BASS_PREFERS_ACCOMPANIMENT:
+        # accompaniment_source feeds BOTH the melody source for Piano/Guitar
+        # AND the support-note extraction for Piano/Guitar below — Demucs'
+        # "other" stem is the closest single stem to "the rest of the band".
+        accompaniment_source = (
+            separation_result.other_path if separation_result else prepared_path
+        )
+        if instrument in BASS_STEM_INSTRUMENTS:
+            melody_source = separation_result.bass_path if separation_result else prepared_path
+            arrangement_source = "bass_stem" if separation_result else "full_mix"
+        elif instrument in ACCOMPANIMENT_STEM_INSTRUMENTS:
             melody_source = accompaniment_source
             arrangement_source = "accompaniment" if separation_result else "full_mix"
         else:
-            melody_source = vocal_source
+            melody_source = separation_result.vocals_path if separation_result else prepared_path
             arrangement_source = "vocal_stem" if separation_result else "full_mix"
             if separation_result is not None:
                 warnings.append("Using vocal stem for main melody.")

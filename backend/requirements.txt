@@ -23,3 +23,10 @@ mir_eval
 # Provides pkg_resources, which some packages still import at runtime on Mac
 # (fresh Python 3.12 venvs no longer include it by default).
 setuptools
+
+# v0.9.6: Piano Expert (piano_transcription_inference) and Demucs (demucs) are
+# deliberately NOT listed here. Both are real, optional adapters
+# (backend/app/piano_expert.py, backend/app/separation.py) that activate
+# automatically once installed — but both also pull in PyTorch, so they stay
+# opt-in rather than part of the default install. See the README's
+# "Transcription engine stack" section for exact install commands.

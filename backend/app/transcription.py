@@ -233,7 +233,7 @@ def run_transcription(
 
     Returns the transcription result dict (same shape written to json_out_path).
     """
-    from app.routing import describe_difficulty, resolve_routing
+    from app.routing import describe_difficulty, resolve_routing, specialist_engine_for
 
     plan = resolve_routing(instrument, mode, detection)
 
@@ -244,7 +244,31 @@ def run_transcription(
     engine_messages: list[str] = []
     notes: list[dict[str, Any]] | None = None
 
-    if detection == "poly":
+    # v0.9.6: a specialist engine (currently only Piano Expert for piano) is
+    # tried first when poly detection is requested. It's entirely optional —
+    # when unavailable this block does nothing and the existing Basic
+    # Pitch/CQT/pYIN chain below runs exactly as before, unchanged.
+    specialist_key = specialist_engine_for(instrument) if detection == "poly" else None
+    if specialist_key == "piano_expert":
+        try:
+            from app.piano_expert import is_available as piano_expert_available
+            from app.piano_expert import transcribe_piano
+
+            available, _reason = piano_expert_available()
+            if available:
+                pe_notes, pe_messages = transcribe_piano(audio_path)
+                if pe_notes:
+                    notes = pe_notes
+                    detection_used = "poly"
+                    engine_used = "piano_expert"
+                    engine_messages = pe_messages
+                    if pe_messages:
+                        detection_note = " ".join(pe_messages)
+        except Exception as exc:  # noqa: BLE001
+            notes = None
+            fallback_reason = f"Piano Expert failed ({exc}), used Basic Pitch instead."
+
+    if detection == "poly" and notes is None:
         try:
             from app.polyphonic import detect_notes_poly
 
