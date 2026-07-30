@@ -13,8 +13,10 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from music21 import (
     chord as m21_chord,
@@ -31,7 +33,7 @@ from music21 import (
 )
 
 from app.chords import KEY_SHARPS, m21_chord_figure
-from app.notation_cleanup import clean_notes, make_readable
+from app.notation_cleanup import clean_notes, clean_notes_poly, make_readable
 
 TEMPO_BPM = 120
 SECONDS_PER_QUARTER = 60 / TEMPO_BPM
@@ -130,8 +132,11 @@ def notes_to_musicxml(
     if cleaned:
         # The wobble/merge/readable passes assume ONE melody line — running
         # them on polyphonic notes would merge or drop chord members, so
-        # polyphonic transcriptions only get grid quantization (below).
-        if not polyphonic:
+        # polyphonic transcriptions get their own chord-preserving pass
+        # (v0.9.3): grid starts, deduped pitches, readable durations.
+        if polyphonic:
+            notes = clean_notes_poly(notes, readable=rhythm_detail != "precise")
+        else:
             notes = clean_notes(notes)
             if rhythm_detail != "precise":
                 notes = make_readable(notes)
@@ -317,7 +322,15 @@ def notes_to_musicxml(
     score.makeNotation(inPlace=True)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    score.write("musicxml", fp=str(out_path))
+    # Write to a unique temp file, then swap it in atomically: two
+    # concurrent requests (e.g. the sheet view and a download) must never
+    # see each other's half-written file.
+    tmp_path = out_path.with_name(f".{uuid4().hex}-{out_path.name}")
+    try:
+        score.write("musicxml", fp=str(tmp_path))
+        os.replace(tmp_path, out_path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
     return out_path
 
 

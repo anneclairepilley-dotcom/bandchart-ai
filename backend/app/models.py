@@ -43,6 +43,13 @@ class Note(BaseModel):
     start_time: float = Field(..., ge=0)
     duration: float = Field(..., gt=0)
     confidence: float = Field(..., ge=0, le=1)
+    # v0.9.3 optional fields (absent on older notes): playback loudness from
+    # the detector, and a chord-group id shared by simultaneous notes.
+    velocity: Optional[float] = Field(None, ge=0, le=1)
+    group: Optional[str] = Field(None, max_length=32)
+    # True on a repeated note the melody detector split off at a re-strike —
+    # tells the notation cleanup never to glue it back onto its predecessor.
+    reattack: Optional[bool] = None
 
 
 class NotesUpdate(BaseModel):

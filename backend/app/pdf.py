@@ -10,10 +10,12 @@ starting, only fail the PDF request with an actionable message.
 
 from __future__ import annotations
 
+import os
 import threading
 import xml.etree.ElementTree as ET
 from io import BytesIO
 from pathlib import Path
+from uuid import uuid4
 
 VEROVIO_OPTIONS = {
     "scale": 50,
@@ -98,6 +100,13 @@ def musicxml_to_pdf(musicxml_path: Path, pdf_path: Path) -> Path:
         writer.append(PdfReader(BytesIO(page_pdf)))
 
     pdf_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(pdf_path, "wb") as f:
-        writer.write(f)
+    # Write to a unique temp file, then swap it in atomically, so a
+    # concurrent request never reads a half-written PDF.
+    tmp_path = pdf_path.with_name(f".{uuid4().hex}-{pdf_path.name}")
+    try:
+        with open(tmp_path, "wb") as f:
+            writer.write(f)
+        os.replace(tmp_path, pdf_path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
     return pdf_path

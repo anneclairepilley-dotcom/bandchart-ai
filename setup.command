@@ -96,6 +96,21 @@ if ./.venv/bin/python -c "import yt_dlp" >/dev/null 2>&1; then
 else
   echo -e "${YELLOW}Warning:${NC} yt-dlp didn't install — YouTube import won't work until you run setup.command again."
 fi
+
+# v0.9.3: the Basic Pitch note-detection model. Installed WITHOUT its declared
+# dependencies on purpose — they pin an old TensorFlow that doesn't install on
+# Python 3.12, and the bundled ONNX model doesn't need TensorFlow at all
+# (onnxruntime from requirements.txt runs it). If this step fails the app
+# still works: polyphonic mode falls back to the built-in simple detector.
+echo "Installing the Basic Pitch note-detection model (used by polyphonic mode)…"
+if ./.venv/bin/pip install --no-deps basic-pitch >/dev/null 2>&1 \
+   && ./.venv/bin/python -c "import basic_pitch.inference" >/dev/null 2>&1; then
+  echo -e "${GREEN}Basic Pitch model installed.${NC}"
+else
+  echo -e "${YELLOW}Note:${NC} the Basic Pitch model couldn't be installed on this Mac."
+  echo "      Everything still works — polyphonic (chords) mode just uses the built-in"
+  echo "      simpler detector instead. Run setup.command again later to retry."
+fi
 cd ..
 echo -e "${GREEN}Backend ready.${NC}"
 echo

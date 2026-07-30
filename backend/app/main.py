@@ -438,7 +438,11 @@ def update_notes(project_id: str, body: NotesUpdate) -> JSONResponse:
     project = _get_project_or_404(project_id)
     if not storage.transcription_json_path(project_id).exists():
         raise HTTPException(status_code=404, detail="Project has not been transcribed yet")
-    data = _save_working_notes(project, [n.model_dump() for n in body.notes])
+    # exclude_none keeps stored notes tidy: older/melody notes simply have
+    # no velocity/group keys instead of nulls.
+    data = _save_working_notes(
+        project, [n.model_dump(exclude_none=True) for n in body.notes]
+    )
     return JSONResponse(content=data)
 
 

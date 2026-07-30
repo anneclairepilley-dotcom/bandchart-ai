@@ -113,10 +113,13 @@ def build_tab(
     strings = spec["strings"]
     label = spec["label"]
 
-    # Tab stays melody-first (v0.9.2): when several notes share the same
-    # start time (polyphonic transcriptions), only the highest — the
-    # melody note — goes on the tab. Original indexes are kept so the
-    # play-along highlight still lines up with the full note list.
+    # Tab stays melody-first (v0.9.2): when several notes start together
+    # (polyphonic transcriptions), only the highest — the melody note —
+    # goes on the tab. Notes within 40ms of a cluster's first onset count
+    # as "together" (v0.9.3: the Basic Pitch model spreads chord members
+    # over a few milliseconds, so exact equality is not enough). Original
+    # indexes are kept so the play-along highlight still lines up.
+    CHORD_WINDOW_S = 0.04
     keep_indexes: set[int] = set()
     dropped_chord_members = 0
     i = 0
@@ -125,7 +128,7 @@ def build_tab(
         best = i
         while (
             j < len(notes)
-            and abs(notes[j]["start_time"] - notes[i]["start_time"]) < 1e-6
+            and notes[j]["start_time"] - notes[i]["start_time"] <= CHORD_WINDOW_S
         ):
             if notes[j]["pitch"] > notes[best]["pitch"]:
                 best = j

@@ -26,10 +26,83 @@ HOP_LENGTH = 512
 FMIN = librosa.note_to_hz("C2")  # ~65 Hz
 FMAX = librosa.note_to_hz("C7")  # ~2093 Hz
 MIN_NOTE_DURATION = 0.09  # seconds; drops single-frame blips
+# v0.9.3: notes whose average pYIN voicing probability is below this are
+# treated as noise (never applied if it would empty the transcription).
+CONFIDENCE_FLOOR = 0.35
+# A split point inside a sustained note must be a real re-attack: loudness
+# right after the onset at least this much louder than just before it
+# (vibrato and harmonic wobble don't dip-and-rise like a new strike does).
+REATTACK_RISE = 1.35
+# Minimum spacing between split points (and from the note's edges).
+SPLIT_MIN_GAP = 0.15
 
 
-def _detect_notes(audio_path: Path) -> list[dict[str, Any]]:
-    """Track pitch frame-by-frame with pYIN, then group same-pitch frames into notes."""
+def _reattack_onsets(
+    y: np.ndarray, sr: int, onset_times: np.ndarray
+) -> list[float]:
+    """Keep only onsets where loudness clearly rises — genuine re-strikes."""
+    rms = librosa.feature.rms(y=y, frame_length=FRAME_LENGTH, hop_length=HOP_LENGTH)[0]
+    rms_times = librosa.times_like(rms, sr=sr, hop_length=HOP_LENGTH)
+    kept: list[float] = []
+    for t in onset_times:
+        t = float(t)
+        before = rms[(rms_times >= t - 0.10) & (rms_times <= t - 0.02)]
+        after = rms[(rms_times >= t) & (rms_times <= t + 0.08)]
+        if before.size == 0 or after.size == 0:
+            kept.append(t)  # at the very edges, trust the onset detector
+            continue
+        if float(after.mean()) >= REATTACK_RISE * float(before.mean()):
+            kept.append(t)
+    return kept
+
+
+def _split_note_at_onsets(
+    note: dict[str, Any], onset_times: list[float], hop_duration: float
+) -> list[dict[str, Any]]:
+    """Split one sustained same-pitch note where new attacks occur inside it.
+
+    pYIN merges repeated notes of the same pitch (two quick C4s become one
+    long C4). Re-attack onsets inside the note's span mark the re-strikes.
+    Split points are spaced so every piece keeps a sensible length.
+    """
+    start, end = note["start"], note["end"]
+    inner: list[float] = []
+    last = start
+    for t in onset_times:
+        if t <= start or t >= end:
+            continue
+        if t - last >= SPLIT_MIN_GAP and end - t >= SPLIT_MIN_GAP:
+            inner.append(t)
+            last = t
+    if not inner:
+        return [note]
+
+    pieces: list[dict[str, Any]] = []
+    confidences = note["confidences"]
+    boundaries = [start, *inner, end]
+    for piece_index, (seg_start, seg_end) in enumerate(zip(boundaries, boundaries[1:])):
+        i0 = int((seg_start - start) / hop_duration)
+        i1 = max(i0 + 1, int((seg_end - start) / hop_duration))
+        pieces.append(
+            {
+                "pitch": note["pitch"],
+                "start": seg_start,
+                "end": seg_end,
+                "confidences": confidences[i0:i1] or confidences[-1:],
+                # Mark deliberate re-strikes so the notation cleanup never
+                # glues them back into one long note.
+                "reattack": piece_index > 0,
+            }
+        )
+    return pieces
+
+
+def _detect_notes(audio_path: Path) -> tuple[list[dict[str, Any]], list[str]]:
+    """Track pitch frame-by-frame with pYIN, then group same-pitch frames into notes.
+
+    Returns (notes, messages): messages carry honest caveats (e.g. that
+    low-confidence notes were removed).
+    """
     y, sr = librosa.load(str(audio_path), sr=SAMPLE_RATE, mono=True)
 
     f0, voiced_flag, voiced_prob = librosa.pyin(
@@ -70,30 +143,55 @@ def _detect_notes(audio_path: Path) -> list[dict[str, Any]]:
     if current is not None:
         raw_notes.append(current)
 
-    notes = []
+    # v0.9.3: percussive onsets inside a sustained same-pitch note mark
+    # repeated strikes that pYIN glued together — split them apart. Only
+    # onsets with a genuine loudness rise count (not vibrato wobble).
+    onset_times = librosa.onset.onset_detect(
+        y=y, sr=sr, hop_length=HOP_LENGTH, backtrack=False, units="time"
+    )
+    reattacks = _reattack_onsets(y, sr, onset_times)
+    split_notes: list[dict[str, Any]] = []
     for note in raw_notes:
+        split_notes.extend(_split_note_at_onsets(note, reattacks, hop_duration))
+
+    notes = []
+    for note in split_notes:
         duration = note["end"] - note["start"]
         if duration < MIN_NOTE_DURATION:
             continue
-        notes.append(
-            {
-                "pitch": note["pitch"],
-                "pitch_name": pretty_midi.note_number_to_name(note["pitch"]),
-                "start_time": round(note["start"], 4),
-                "duration": round(duration, 4),
-                "confidence": round(float(np.mean(note["confidences"])), 4),
-            }
-        )
+        assembled = {
+            "pitch": note["pitch"],
+            "pitch_name": pretty_midi.note_number_to_name(note["pitch"]),
+            "start_time": round(note["start"], 4),
+            "duration": round(duration, 4),
+            "confidence": round(float(np.mean(note["confidences"])), 4),
+        }
+        if note.get("reattack"):
+            assembled["reattack"] = True
+        notes.append(assembled)
+
+    # v0.9.3: drop notes the tracker itself doubted — unless that would
+    # wipe the whole transcription (quiet recordings score low overall).
+    messages: list[str] = []
+    confident = [n for n in notes if n["confidence"] >= CONFIDENCE_FLOOR]
+    if confident and len(confident) < len(notes):
+        notes = confident
+        messages.append("Low-confidence notes were removed.")
 
     notes.sort(key=lambda n: n["start_time"])
-    return notes
+    return notes, messages
 
 
 def write_midi_from_notes(notes: list[dict[str, Any]], midi_out_path: Path) -> None:
     midi = pretty_midi.PrettyMIDI()
     instrument = pretty_midi.Instrument(program=0, name="Transcribed Melody")
     for note in notes:
-        velocity = max(1, min(127, round(note["confidence"] * 127)))
+        # v0.9.3: prefer the detector's loudness when present (poly notes);
+        # older/melody notes keep the confidence-as-velocity behaviour.
+        loudness = note.get("velocity")
+        if loudness is None:
+            loudness = note["confidence"]
+        velocity = max(1, min(127, round(loudness * 127)))
         instrument.notes.append(
             pretty_midi.Note(
                 velocity=velocity,
@@ -142,17 +240,24 @@ def run_transcription(
                 notes = None
                 detection_note = (
                     "Multiple-note detection found nothing usable in this "
-                    "recording, so melody-only transcription was used instead."
+                    "recording. Fell back to melody-only transcription."
                 )
+                if poly_messages:
+                    # Keep the engine's own explanation (e.g. that the Basic
+                    # Pitch model isn't installed) — it says WHY it was empty.
+                    detection_note = " ".join([*poly_messages, detection_note])
         except Exception as exc:  # noqa: BLE001
             notes = None
             detection_note = (
-                f"Multiple-note detection failed ({exc}) — melody-only "
-                "transcription was used instead."
+                f"Multiple-note detection failed ({exc}). "
+                "Fell back to melody-only transcription."
             )
 
     if notes is None:
-        notes = _detect_notes(audio_path)
+        notes, melody_messages = _detect_notes(audio_path)
+        if melody_messages:
+            extra = " ".join(melody_messages)
+            detection_note = f"{detection_note} {extra}" if detection_note else extra
 
     write_midi_from_notes(notes, midi_out_path)
 

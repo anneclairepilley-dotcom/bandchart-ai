@@ -10,3 +10,10 @@ verovio
 cairosvg
 pypdf
 yt-dlp
+# v0.9.3 polyphonic detection (Basic Pitch runs on these via ONNX, CPU only).
+# basic-pitch itself is installed separately with --no-deps (see setup.command
+# and the README) because its declared dependencies pin an old TensorFlow that
+# doesn't install on Python 3.12 — the ONNX model needs none of that.
+onnxruntime
+resampy
+mir_eval

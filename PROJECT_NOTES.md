@@ -1,6 +1,6 @@
 # BandChart AI — Project Notes
 
-Living notes for contributors (human or AI). Last updated after v0.9.2 (2026-07).
+Living notes for contributors (human or AI). Last updated after v0.9.3 (2026-07).
 If you are a new Claude Code session: read this file, then README.md, before changing code.
 
 ## Purpose
@@ -220,6 +220,89 @@ Explanations, error messages, and README instructions must stay beginner-friendl
   padding, readable-mode long-note truncation, a Start double-click race, the
   0.0-certainty mask, same-slot keep-later inconsistency, stale YouTube copy, stale
   setupError, and the frontend's hardcoded 2s bars — all fixed and re-verified
+
+### v0.9.3 — better note detection and real polyphony (done)
+The whole version went into note detection; weak side features were parked.
+
+**Engine audit (as of v0.9.2, what v0.9.3 changed):**
+- Pitch detection was `librosa.pyin` in `backend/app/transcription.py::_detect_notes` —
+  a frame-by-frame MONOPHONIC pitch tracker (one melody line); notes were created right
+  there by grouping consecutive same-pitch frames. Weaknesses: repeated same-pitch notes
+  glued into one long note, no amplitude/velocity, low-confidence blips kept
+- Rhythm cleanup lives in `backend/app/notation_cleanup.py` (`clean_notes` +
+  `make_readable`), applied ONLY at export time inside `musicxml.py` — the stored
+  transcription.json is never modified
+- Exports: MIDI written at transcribe/edit time by `transcription.write_midi_from_notes`;
+  MusicXML/PDF/TAB/chord chart generated on demand from transcription.json by
+  `musicxml.py`/`pdf.py`/`tablature.py`/`chords.py` via `main.py`
+- For simultaneous notes the missing pieces were: a real multi-pitch detector, a note
+  format that marks chord membership, chord-aware cleanup, and editor support — all
+  added in v0.9.2/v0.9.3 as below
+
+**What v0.9.3 did:**
+- **Basic Pitch is the primary polyphonic engine** (`backend/app/polyphonic.py::
+  _detect_with_basic_pitch`): Spotify's open-source ICASSP-2022 model, run on CPU via
+  the ONNX network bundled in the pip package. NO TensorFlow: `pip install --no-deps
+  basic-pitch` + onnxruntime/resampy/mir_eval in requirements.txt. **Gotcha
+  (hard-won)**: basic-pitch's declared deps pin tensorflow<2.15.1 which has no wheels
+  for Linux Python 3.12 — a plain `pip install basic-pitch` backtracks into source
+  builds and fails; `--no-deps` is REQUIRED, and `basic_pitch.inference.predict()`
+  auto-selects the bundled ONNX model when TF/coreml/tflite are absent. Import kept
+  lazy (~1.2s). ~1s inference for a 5s clip. Post-filters: pitch 24–100, amplitude
+  ≥0.32, short+weak ghost removal (<0.18s & <0.42), then `_assign_groups` clusters
+  onsets within 40ms into `"group": "chord_N"` ids, caps groups at 4 (strongest
+  kept, honest message). Detected C/F/G sine triads EXACTLY (9 notes, 3 groups)
+- Fallback chain: Basic Pitch missing → v0.9.2 CQT detector (now also group-tagged)
+  with a "see the README to enable the model" message; CQT empty/failed → pYIN
+  melody-only ("Fell back to melody-only transcription."); every step keeps the old
+  behaviour working with a clear detection_note, never a crash
+- **Melody engine improved** (`transcription.py`): repeated same-pitch notes that pYIN
+  glues together are split at RE-ATTACK onsets — onset_detect candidates gated by an
+  RMS dip-and-rise check (after ≥1.35× before), because raw onsets fire on vibrato
+  (the wobbly fixture over-split 8→11 without the gate; with it: exactly 8, and the
+  previously-merged repeated F4s separate). Low-confidence notes (<0.35 mean pYIN
+  voicing prob) dropped with "Low-confidence notes were removed." — but never if that
+  would empty the transcription
+- **Note format**: optional `velocity` (0–1) + `group` ("chord_N") on Note
+  (models.py, lib/api.ts); Basic Pitch fills both; PUT /notes round-trips them
+  (model_dump(exclude_none=True) keeps older notes tidy); MIDI velocity prefers
+  the detector's loudness; sortNotes on the page sorts (start_time, pitch) to match
+  the backend
+- **Chord-aware cleanup** (`notation_cleanup.clean_notes_poly`): eighth-grid starts,
+  same-slot pitches dedupe (longest ring wins), ≤4 per event, readable duration
+  snapping (>semibreve kept for ties; Precise keeps the literal grid), clipped to the
+  next event, group ids reassigned. Used by musicxml.py for poly instead of skipping
+  cleanup entirely (v0.9.2 behaviour)
+- **Play Along**: per-note velocity scales loudness (floored at 0.35 so quiet chord
+  members stay audible); resume/seek now re-schedules the remainder of EVERY
+  mid-ring note, not just the first (chords resume whole)
+- **Editor**: Chord column shows group ids; on POLY projects a per-row blue **+**
+  adds a note at the SAME start time (a third above, source group/velocity copied)
+  for building chords; ✕ still deletes a single note out of a chord. The row + is
+  hidden on melody projects on purpose: the mono engraving path keeps one note per
+  grid slot, so a stacked note would silently vanish from MusicXML/PDF (found by
+  the adversarial review)
+- **Review-round fixes** (adversarial workflow + E2E on synthetic chord fixtures):
+  Basic Pitch events same-pitch REJOINED when the model splits one decaying note in
+  two (gap ≤0.15s and no RMS re-attack at the junction); weak harmonic ghosts
+  (+12/+19/+24/+28 above a stronger cluster member, <0.8× its confidence)
+  suppressed like the CQT path; melody re-strike pieces carry an optional
+  "reattack": true flag that merge_same_pitch/quantize respect, so the split
+  repeated notes survive into the ENGRAVED clean sheet (they used to be re-merged);
+  tab chord clustering uses a 40ms window (BP members aren't sample-identical);
+  musicxml.py/pdf.py write via unique temp file + os.replace (concurrent sheet
+  fetch + download no longer reads a half-written file)
+- **Chord tools parked**: ChordsPanel moved into a collapsed "Experimental tools
+  (chord markers)" details at the bottom of the project page; ChordStrip above
+  sheet/tab and the "Lead sheet" heading flip removed. Roadmap note shown in the UI:
+  Ultimate Guitar-style chord sheets are a much later feature, probably v5.0. All
+  backend chord endpoints/exports unchanged
+- Messages wired end-to-end: "Polyphonic detection is experimental…" (poly notice),
+  "Fell back to melody-only transcription.", "Too many simultaneous notes… strongest
+  4 were kept (simplified output).", "Low-confidence notes were removed.", "This
+  audio is too dense for the current model." (when ≥half the chord moments overflow)
+- setup.command installs basic-pitch (--no-deps) with a friendly fallback note;
+  README documents the extra pip line for Codespaces/manual setups
 
 ### v0.9.2 — readability, click-to-seek, experimental polyphony (done)
 - **Contrast sweep**: dim grays lifted one step app-wide (text-gray-400/500 → 600,
@@ -483,12 +566,16 @@ Next.js proxy, plus confirmed by the owner in Codespaces:
 - `tsc --noEmit` and `npm run lint` clean; scripts syntax-checked and exercised
 
 ## Current limitations
-- **Monophonic only**: pYIN follows one melody line; chords/full-band mixes won't work
-- **Rhythm is approximate**: fixed 120 BPM assumption, 4/4; cleaned style quantizes to an
-  eighth grid (raw: sixteenth) — no real tempo/meter detection, so timing won't match a
-  performance that isn't near 120 BPM
-- **Cleanup trade-offs**: repeated same-pitch notes with small gaps merge into one longer
-  note; genuinely fast ornaments shorter than ~0.15s are treated as noise and dropped;
+- **Melody-first**: the default engine (pYIN) follows one melody line. Polyphonic mode
+  (v0.9.3, Basic Pitch) is experimental — clear piano / simple chords only, max 4
+  simultaneous notes; full-band mixes and dense piano still won't transcribe accurately.
+  The best results still come from clear recordings of one instrument
+- **Rhythm is approximate**: fixed 120 BPM assumption default 4/4 (3/4 and 6/8 selectable);
+  cleaned style quantizes to an eighth grid (raw: sixteenth) — no real tempo/meter
+  detection, so timing won't match a performance that isn't near 120 BPM
+- **Cleanup trade-offs**: repeated same-pitch notes with small gaps can still merge when
+  there's no clear re-attack (v0.9.3 splits them when the loudness dips and rises);
+  genuinely fast ornaments shorter than ~0.15s are treated as noise and dropped;
   key estimation can pick a wrong key on short/chromatic material (raw style is the
   escape hatch)
 - `.mp3`/`.m4a` need ffmpeg on the server (Codespaces: `sudo apt-get install -y ffmpeg`);
@@ -506,6 +593,7 @@ cd /workspaces/bandchart-ai/backend
 python3 -m venv .venv            # first time only
 source .venv/bin/activate
 pip install -r requirements.txt  # first time and after every git pull
+pip install --no-deps basic-pitch  # v0.9.3 polyphonic model (--no-deps is REQUIRED)
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 Terminal 2 — frontend:
@@ -530,11 +618,13 @@ backend/.venv); and Cairo (`brew install cairo`) for PDF export.
 ```
 backend/  FastAPI (Python 3.9+; owner's Codespace uses 3.12)
   app/main.py           all routes under /api; friendly error mapping
-  app/transcription.py  pYIN engine — DO NOT swap without explicit request
+  app/transcription.py  pYIN melody engine (+ re-attack splitting, confidence floor)
+                        — DO NOT swap without explicit request
   app/youtube.py        yt-dlp/ffmpeg YouTube audio import (validation + guards)
   app/musicxml.py       music21 export + INSTRUMENTS table (style=clean|raw)
   app/tablature.py      text tab for guitar/bass/ukulele (tunings, octave fit, layout)
-  app/polyphonic.py     experimental CQT+onset multi-pitch detector (max 4 at once)
+  app/polyphonic.py     polyphonic detection: Basic Pitch (ONNX, lazy import) primary,
+                        CQT+onset fallback; chord grouping, max 4 at once
   app/chords.py         chord-name validation, chart text, rough suggestions, keys
   (settings: Project.instrument/mode/time_signature/key_signature/rhythm_detail)
   app/notation_cleanup.py  wobble/merge/fragment/quantize pipeline for clean style
