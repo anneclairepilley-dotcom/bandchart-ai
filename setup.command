@@ -97,13 +97,16 @@ else
   echo -e "${YELLOW}Warning:${NC} yt-dlp didn't install — YouTube import won't work until you run setup.command again."
 fi
 
-# v0.9.3: the Basic Pitch note-detection model. Installed WITHOUT its declared
-# dependencies on purpose — they pin an old TensorFlow that doesn't install on
-# Python 3.12, and the bundled ONNX model doesn't need TensorFlow at all
-# (onnxruntime from requirements.txt runs it). If this step fails the app
-# still works: polyphonic mode falls back to the built-in simple detector.
-echo "Installing the Basic Pitch note-detection model (used by polyphonic mode)…"
-if ./.venv/bin/pip install --no-deps basic-pitch >/dev/null 2>&1 \
+# v0.9.3: the Basic Pitch note-detection model. Installed PINNED and WITHOUT
+# its declared dependencies on purpose — letting pip resolve them pulls in an
+# old TensorFlow (uninstallable on newer Pythons) or backtracks to an ancient
+# basic-pitch that breaks with "scipy.signal has no attribute 'gaussian'".
+# Version 0.4.0 uses the current scipy API and runs on the bundled ONNX model
+# via onnxruntime (already in requirements.txt) — no TensorFlow needed. If
+# this step fails the app still works: polyphonic mode falls back to the
+# built-in simple detector.
+echo "Installing the Basic Pitch note-detection model (used by multiple-note mode)…"
+if ./.venv/bin/pip install --no-deps "basic-pitch==0.4.0" >/dev/null 2>&1 \
    && ./.venv/bin/python -c "import basic_pitch.inference" >/dev/null 2>&1; then
   echo -e "${GREEN}Basic Pitch model installed.${NC}"
 else

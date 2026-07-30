@@ -60,6 +60,8 @@ export interface Note {
   group?: string | null;
   /** True on a repeated note split off at a re-strike (v0.9.3, backend detail). */
   reattack?: boolean | null;
+  /** Which detector produced this note: "basic_pitch" | "cqt" | "pyin" (v0.9.3). */
+  source?: string | null;
 }
 
 /** One manual chord symbol on the timeline (e.g. Am starting at 2.0s). */

@@ -236,6 +236,7 @@ def _detect_with_basic_pitch(audio_path: Path) -> tuple[list[dict[str, Any]], li
                 "duration": round(duration, 4),
                 "confidence": confidence,
                 "velocity": confidence,
+                "source": "basic_pitch",
             }
         )
 
@@ -360,9 +361,9 @@ def _detect_with_cqt(audio_path: Path) -> tuple[list[dict[str, Any]], list[str]]
                 (int(ringing[-1]) + 1) * frame_time if ringing.size else seg_length_s
             )
             duration_s = min(max(duration_s, MIN_NOTE_DURATION), seg_length_s)
-            notes.append(
-                _make_note(FMIN_MIDI + bin_index, start_s, duration_s, value / top)
-            )
+            cqt_note = _make_note(FMIN_MIDI + bin_index, start_s, duration_s, value / top)
+            cqt_note["source"] = "cqt"
+            notes.append(cqt_note)
 
     notes, messages = _assign_groups(notes)
     if overflowed and not messages:

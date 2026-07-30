@@ -1445,13 +1445,13 @@ export default function ProjectDetailPage() {
                       }}
                       data-testid="detection-poly"
                     />
-                    Simple polyphonic / chords (experimental)
+                    Basic Pitch / multiple notes
                   </label>
                 </div>
                 <p className="mt-1 text-xs text-gray-600">
-                  Polyphonic detection is experimental and works best with
-                  clear piano or simple chords. Piano + Direct transcription
-                  turns it on automatically.
+                  Multiple-note detection works best with clear piano or
+                  simple chords. Dense songs may still need editing. Piano +
+                  Direct transcription turns it on automatically.
                 </p>
               </fieldset>
             </div>
@@ -1553,8 +1553,8 @@ export default function ProjectDetailPage() {
                 className="mt-2 rounded border border-blue-200 bg-blue-50 p-2 text-xs text-blue-900"
                 data-testid="poly-note"
               >
-                Polyphonic detection is experimental and works best with
-                clear piano or simple chords.
+                Multiple-note detection works best with clear piano or simple
+                chords. Dense songs may still need editing.
               </p>
             )}
             {notes?.detection_note && (
