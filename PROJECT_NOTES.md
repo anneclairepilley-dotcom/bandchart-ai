@@ -1,6 +1,6 @@
 # BandChart AI — Project Notes
 
-Living notes for contributors (human or AI). Last updated after v0.9.5 (2026-07).
+Living notes for contributors (human or AI). Last updated after v1.0 (2026-07).
 If you are a new Claude Code session: read this file, then README.md, before changing code.
 
 ## Purpose
@@ -220,6 +220,141 @@ Explanations, error messages, and README instructions must stay beginner-friendl
   padding, readable-mode long-note truncation, a Start double-click race, the
   0.0-certainty mask, same-slot keep-later inconsistency, stale YouTube copy, stale
   setupError, and the frontend's hardcoded 2s bars — all fixed and re-verified
+
+### v1.0 — Solo Arrangement rebuild (done)
+Goal: make Solo Arrangement actually useful on real pop/rock songs — find the main
+melody (vocal first) and turn it into a playable solo part — instead of running the
+same single-line detector used for Direct transcription on the whole mixed song.
+Direct transcription (`app/transcription.py`) is completely untouched; Solo Arrangement
+gets its own pipeline that reuses the same engines.
+
+**`backend/app/separation.py`** (new) — optional Demucs vocal/accompaniment adapter.
+Investigated Meta's Demucs (PyPI `demucs`, htdemucs model) for real vocal isolation via
+a background agent, mirroring the v0.9.4 engine-investigation pattern. Findings:
+- Installs (2m43s, torch 2.13.0) but reproduces the exact CUDA-bloat problem found with
+  `piano_transcription_inference` in v0.9.4: `download.pytorch.org` (the CPU-only wheel
+  host) is policy-blocked here (403 on CONNECT), so pip falls back to the default PyPI
+  wheel, which drags in ~2.7GB of unused CUDA packages (cublas, cudnn, cufft, cusolver,
+  nccl, triton) even with no GPU present. Total venv: 4.7GB. One improvement over the
+  ByteDance case: demucs does NOT need torchaudio for inference, only under its `[train]`
+  extra (uses a Rust `sphn` library for I/O instead)
+- **Harder blocker**: the htdemucs checkpoint downloads from `dl.fbaipublicfiles.com`;
+  `huggingface.co` (an alternate repo) is separately blocked too. Both are TCP-CONNECT-
+  level blocked here, not just slow — so no htdemucs variant, however small, can even be
+  fetched in this environment, regardless of the CUDA question
+- CPU inference itself is NOT the problem: the investigation instantiated the real
+  (untrained) HTDemucs architecture and ran a forward pass on a synthetic clip — 9.3s for
+  an 8s clip on 4 CPU cores, roughly 1x realtime. 26.9M params (~108MB fp32), matching a
+  real htdemucs checkpoint's rough size; `htdemucs_ft` bags 4 such models (~4x cost),
+  `mdx_extra_q` is a smaller quantized bag but its actual size couldn't be verified here
+  (host unreachable)
+- **Decision: document-only, not wired as a live dependency.** `demucs` is NOT in
+  `requirements.txt` and is never installed automatically — per the spec ("if Demucs is
+  too heavy, add it as optional or document it" / "do not break the app if Demucs is not
+  installed"). `separation.py` is a real, working adapter (`is_available()` lazily
+  imports `demucs.separate`; `separate_vocals()` shells out to
+  `demucs.separate.main(["-n","htdemucs","--two-stems","vocals",...])` and reads
+  `htdemucs/<stem>/vocals.wav` + `no_vocals.wav`) — if a user manually
+  `pip install demucs` in an environment where those two hosts are reachable, it will
+  actually run. By default, and on ANY failure (not installed, `SystemExit` from
+  `demucs.separate.main`, missing output files, any exception), `separate_vocals()`
+  returns `None` and never raises — the arrangement pipeline always falls back to the
+  full mix and shows "Using full mix because no clear vocal stem was isolated."
+
+**`backend/app/arrangement.py`** (new) — `run_solo_arrangement()`, the Solo Arrangement
+pipeline, parallel to (and independent of) `transcription.run_transcription()`:
+1. `_prepare_audio()`: librosa peak-normalise (to 0.95) + `librosa.effects.trim(top_db=40)`
+   into a `tempfile.TemporaryDirectory`-scoped scratch WAV — the user's original upload
+   is never touched, matching the existing convention that Play Along/download always
+   read the untouched original audio file
+2. `separate_vocals()` (above) — None in this environment, so `arrangement_source` is
+   always `"full_mix"` here; the code path for `"vocal_stem"`/`"accompaniment"` exists and
+   is exercised by the unit tests below, ready for an environment where Demucs works
+3. Melody source routing: everyone gets the vocal stem when one exists, EXCEPT bass
+   (`BASS_PREFERS_ACCOMPANIMENT`), which always follows the accompaniment/full mix — a
+   bass part follows the low end of the song, not the singer
+4. `_detect_melody()` re-implements the SAME engine dispatch as
+   `run_transcription()`/`app/routing.py` (Basic Pitch → CQT fallback → pYIN, honest
+   `fallback_reason` strings) but on the caller-chosen source instead of always the
+   original upload — duplicated rather than extracted into transcription.py, to keep
+   Direct transcription's code path completely unchanged (lower regression risk than a
+   shared-helper refactor)
+5. `_extract_support_notes()` (piano + guitar only, `SUPPORT_CAPABLE_INSTRUMENTS`, and
+   only when `arrangement_focus` is `melody_support` or `piano_style`): runs
+   `polyphonic.detect_notes_poly` on the accompaniment/full-mix source, keeps only notes
+   below middle C (`SUPPORT_MAX_PITCH=60`, so they never collide with the melody
+   register), then thins to a small fixed budget (24 notes / 0.6s min gap for Easy, 48 /
+   0.3s for Medium — `piano_style` always uses the Medium budget for a fuller left hand
+   regardless of the difficulty control) — deliberately NOT "detect everything and dump
+   it in"; tagged `"source": "accompaniment"` on each note
+6. Merge: melody + support notes combined; if any support notes were added, `detection`
+   flips to `"poly"` (even when the melody itself came from monophonic pYIN) so the
+   export pipeline treats it as polyphonic — `_assign_groups` (imported from
+   `polyphonic.py`, generous cap of 8) re-clusters the combined list purely for chord-id/
+   density-display purposes. **No changes needed in `musicxml.py`/`tablature.py`**: the
+   existing grand-staff split-at-middle-C logic and melody-first tab collapsing already
+   handle merged melody+support notes correctly, since they're driven by pitch register
+   and quantized timing, not by any new field
+7. Result dict is the same shape `run_transcription()` writes, plus `arrangement_source`
+   ("vocal_stem"|"accompaniment"|"full_mix"), `separation_engine` ("demucs" or null),
+   `arrangement_focus`, `arrangement_difficulty` — always present, never hidden
+8. Honest messages wired exactly to spec wording: "Solo Arrangement finds the strongest
+   melody and creates a playable part. Dense songs may need editing." (always, first
+   warning); "Using vocal stem for main melody." (separation succeeded, non-bass);
+   "Using full mix because no clear vocal stem was isolated." (separation unavailable/
+   failed, all instruments); "Added simple support notes. Please check and edit." (support
+   notes were actually added)
+
+**Bass without separation — a known, documented limitation**: unit-testing on a
+synthetic "vocal pop song" fixture (see below) with Demucs unavailable showed bass falls
+back to the SAME full-mix pYIN pass as every other instrument, which tracks the vocal
+melody (the strongest, most voice-like line in the mix) rather than a real bassline — bass
+doesn't get a genuinely different result from voice/violin/etc. without real source
+separation. This is honestly a real gap, not swept under the rug: the code path and
+`arrangement_source` labeling are correct (bass never claims to use a vocal stem), the
+pipeline never crashes, and output is always playable/editable — but on a real song
+without Demucs, expect the bass arrangement to often need heavy editing or replacement.
+Fixing this properly needs either working source separation or a bass-specific frequency
+bias in the detector (considered, not implemented this version — would mean touching
+`transcription.py`'s shared FMIN/FMAX constants, adding regression risk to Direct
+transcription for a benefit that's moot without separation anyway)
+
+**Frontend** (`app/projects/[id]/page.tsx`, `lib/api.ts`):
+- New "Arrangement focus" (Main melody / Melody + simple support / Piano-style
+  arrangement) and "Arrangement difficulty" (Easy / Medium) radio groups inside the
+  existing "Advanced settings" details, shown ONLY when Solo arrangement mode is
+  selected (Direct transcription never sees them) — defaults Main melody / Easy per spec,
+  Readable rhythm already defaulted on since v0.9.1
+- New status block `data-testid="arrangement-status"` (separate element from the existing
+  v0.9.5 `engine-status` block, so its "Mode:"/"Warnings:" lines never collide with that
+  block's differently-scoped "Mode: Multiple notes"-style routing label) shown only when
+  `notes.arrangement_source` is present: `Mode: Solo arrangement` / `Source: <label>` /
+  `Engine: [Demucs + ]<engine label>` / `Arrangement focus: <label>` / `Warnings: <same
+  difficulty+warnings composition as engine-status>`
+- `_save_working_notes` (main.py) preserves the 4 new fields exactly like the v0.9.5
+  routing fields — a note edit or reset never changes which source/engine produced the
+  original arrangement
+
+**Testing**: unit-tested `run_solo_arrangement()` directly (venv heredocs) across
+voice/piano/guitar/bass/violin × main_melody/melody_support/piano_style before any
+server involvement, then a new Playwright suite (`test_v10.js`, 29 checks) plus a full
+re-run of the existing v0.9.3/Engine Lab/v0.9.5 suites (91 checks) — all green. Built a
+synthetic **vocal pop song fixture** (16s, numpy+soundfile: a vocal-range sung-style
+melody with light harmonics/vibrato over a quiet root-note bassline, mixed vocal-forward
+like a typical pop mix) since no real pop song audio exists in this sandbox and YouTube
+import (Mrs Magic, `youtu.be/yO_OD7Yx2j8`) is still blocked from this cloud environment
+(confirmed again this version — 502 "Couldn't reach YouTube from the server", same as
+every prior version; the owner needs to run Test 3 locally). On that fixture, pYIN's
+full-mix fallback (no Demucs) correctly tracked the vocal melody, not the bassline —
+validating that a vocal-forward mix (typical real production) already works reasonably
+well even without separation; an earlier, more bass-forward version of the same fixture
+showed pYIN latching onto the bass line instead, which is exactly the failure mode real
+source separation is meant to fix. Direct transcription sanity gate (C major chord,
+Piano) re-verified unchanged.
+
+**Chord feature**: still parked under "Experimental tools" (v0.9.3), untouched — per
+spec, not brought back as a main feature; roadmap note in the UI is unchanged ("Ultimate
+Guitar-style chord sheets are a much later feature, probably v5.0").
 
 ### v0.9.5 — smart transcription routing (done)
 Uses the v0.9.4 Engine Lab findings to make BandChart choose engine/polyphony settings
@@ -556,14 +691,15 @@ The whole version went into note detection; weak side features were parked.
   auto-scroll — scrollIntoViewIfNeeded() the sheet first or every click silently
   misses and reads as "seek doesn't work" (it did; the clicks never landed)
 
-### v1.0 — planned next
+### Next — planned
 Not decided. Ask the owner. Long-term: v2.0 is still planned as the big black/silver
-premium redesign (not yet — the owner will ask for it explicitly). The app is still
-melody-first and strongest on clear single melody lines; multiple-note detection is
-experimental (clear piano / simple chords only); auto chords are rough suggestions
-only; accurate complex-piano / full-band transcription and stem separation remain
-future work. Other long-term items (full band charts, rehearsal packs) remain
-unapproved; see out-of-scope below.
+premium redesign (not yet — the owner will ask for it explicitly). As of v1.0, Solo
+Arrangement has its own melody-finding pipeline (see above) but real source separation
+(Demucs) is document-only in this environment — a bass-forward or dense full mix without
+an isolated vocal stem can still mistrack the melody; auto chords are still rough
+suggestions only; accurate complex-piano / full-band transcription remains future work.
+Other long-term items (full band charts, rehearsal packs) remain unapproved; see
+out-of-scope below.
 
 ### v0.6.2 — verovio made optional for Mac setup (done)
 - verovio sometimes has no wheel for a Mac's Python/OS combo and fails to compile
@@ -790,6 +926,15 @@ Next.js proxy, plus confirmed by the owner in Codespaces:
   instrument. v0.9.5's routing chooses good defaults per instrument, but does not make
   the underlying detectors more accurate — Mrs Magic (the hard piano benchmark) remains
   unsolved and unverified beyond this cloud environment's YouTube block
+- **No real vocal isolation in this environment**: v1.0's Solo Arrangement pipeline
+  supports Demucs source separation in code (`app/separation.py`), but Demucs itself is
+  document-only here — it drags in ~4.7GB of unused CUDA packages AND its model
+  checkpoint host is network-blocked in this sandbox (see the v1.0 notes above). Solo
+  Arrangement always falls back to the full mix; on a vocal-forward mix (typical pop
+  production) pYIN still finds the melody reasonably well, but a bass-forward or dense
+  mix can mistrack it. Bass instrument arrangements are hit hardest by this: without
+  separation, bass gets the SAME full-mix melody pass as everything else (usually the
+  vocal line), not a real bassline
 - **Rhythm is approximate**: fixed 120 BPM assumption default 4/4 (3/4 and 6/8 selectable);
   cleaned style quantizes to an eighth grid (raw: sixteenth) — no real tempo/meter
   detection, so timing won't match a performance that isn't near 120 BPM
@@ -848,8 +993,14 @@ backend/  FastAPI (Python 3.9+; owner's Codespace uses 3.12)
                         instrument-specific caps, e.g. violin=2)
   app/routing.py         v0.9.5 smart routing: per-instrument polyphony cap + default
                         note_detection + caution notes + describe_difficulty()
+  app/separation.py     v1.0 optional Demucs vocal/accompaniment adapter — document-only
+                        in this environment (never installed automatically); never raises
+  app/arrangement.py    v1.0 run_solo_arrangement(): the Solo Arrangement pipeline
+                        (audio prep, optional separation, melody + sparse support notes)
+                        — parallel to run_transcription(), which stays untouched
   app/chords.py         chord-name validation, chart text, rough suggestions, keys
-  (settings: Project.instrument/mode/time_signature/key_signature/rhythm_detail)
+  (settings: Project.instrument/mode/time_signature/key_signature/rhythm_detail/
+  note_detection/arrangement_focus/arrangement_difficulty)
   app/notation_cleanup.py  wobble/merge/fragment/quantize pipeline for clean style
   app/pdf.py            verovio/cairosvg/pypdf PDF engraving (singleton toolkit + lock)
   app/storage.py        storage/projects/<id>/{project.json,audio/,output/}

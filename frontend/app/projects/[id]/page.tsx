@@ -70,6 +70,17 @@ const ROUTING_MODE_LABELS: Record<string, string> = {
   multiple_notes: "Multiple notes",
   double_stops: "Double-stops",
 };
+// v1.0 Solo Arrangement status labels — mirrors backend/app/arrangement.py.
+const ARRANGEMENT_SOURCE_LABELS: Record<string, string> = {
+  vocal_stem: "vocal stem",
+  accompaniment: "accompaniment",
+  full_mix: "full mix",
+};
+const ARRANGEMENT_FOCUS_LABELS: Record<string, string> = {
+  main_melody: "Main melody",
+  melody_support: "Melody + support",
+  piano_style: "Piano-style arrangement",
+};
 
 /** Mirrors backend/app/routing.py::default_note_detection — the note
  * detection value to pre-select before the user touches the control
@@ -369,6 +380,14 @@ export default function ProjectDetailPage() {
     "melody"
   );
   const detectionTouchedRef = useRef(false);
+  // v1.0 Solo Arrangement controls — ignored by Direct transcription.
+  // Defaults: Main melody, Easy (Readable rhythm already defaults on above).
+  const [setupFocus, setSetupFocus] = useState<
+    "main_melody" | "melody_support" | "piano_style"
+  >("main_melody");
+  const [setupDifficulty, setSetupDifficulty] = useState<"easy" | "medium">(
+    "easy"
+  );
 
   // v0.9.2 click-to-seek: PlayAlong registers its seek function here and
   // the sheet / timeline / tab / note table call it.
@@ -792,6 +811,19 @@ export default function ProjectDetailPage() {
             setSetupDetection(data.note_detection);
             detectionTouchedRef.current = true;
           }
+          if (
+            data.arrangement_focus === "main_melody" ||
+            data.arrangement_focus === "melody_support" ||
+            data.arrangement_focus === "piano_style"
+          ) {
+            setSetupFocus(data.arrangement_focus);
+          }
+          if (
+            data.arrangement_difficulty === "easy" ||
+            data.arrangement_difficulty === "medium"
+          ) {
+            setSetupDifficulty(data.arrangement_difficulty);
+          }
         }
       })
       .catch((err: unknown) => {
@@ -932,6 +964,8 @@ export default function ProjectDetailPage() {
         key_signature: setupKey,
         rhythm_detail: setupRhythm,
         note_detection: setupDetection,
+        arrangement_focus: setupFocus,
+        arrangement_difficulty: setupDifficulty,
       });
       setProject(updated);
       setInstrumentKey(setupInstrument);
@@ -1467,6 +1501,80 @@ export default function ProjectDetailPage() {
                   Direct transcription turns it on automatically.
                 </p>
               </fieldset>
+
+              {setupMode === "solo_arrangement" && (
+                <>
+                  <fieldset>
+                    <legend className="mb-1 text-gray-700">
+                      Arrangement focus
+                    </legend>
+                    <div className="flex flex-col gap-1">
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="radio"
+                          name="arrangementFocus"
+                          checked={setupFocus === "main_melody"}
+                          onChange={() => setSetupFocus("main_melody")}
+                          data-testid="focus-main-melody"
+                        />
+                        Main melody (recommended)
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="radio"
+                          name="arrangementFocus"
+                          checked={setupFocus === "melody_support"}
+                          onChange={() => setSetupFocus("melody_support")}
+                          data-testid="focus-melody-support"
+                        />
+                        Melody + simple support
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="radio"
+                          name="arrangementFocus"
+                          checked={setupFocus === "piano_style"}
+                          onChange={() => setSetupFocus("piano_style")}
+                          data-testid="focus-piano-style"
+                        />
+                        Piano-style arrangement
+                      </label>
+                    </div>
+                    <p className="mt-1 text-xs text-gray-600">
+                      Support notes are only added for Piano and Guitar — a
+                      small number of simple notes under the melody, not a
+                      full reduction of everything detected.
+                    </p>
+                  </fieldset>
+                  <fieldset>
+                    <legend className="mb-1 text-gray-700">
+                      Arrangement difficulty
+                    </legend>
+                    <div className="flex flex-col gap-1">
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="radio"
+                          name="arrangementDifficulty"
+                          checked={setupDifficulty === "easy"}
+                          onChange={() => setSetupDifficulty("easy")}
+                          data-testid="difficulty-easy"
+                        />
+                        Easy (recommended)
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="radio"
+                          name="arrangementDifficulty"
+                          checked={setupDifficulty === "medium"}
+                          onChange={() => setSetupDifficulty("medium")}
+                          data-testid="difficulty-medium"
+                        />
+                        Medium
+                      </label>
+                    </div>
+                  </fieldset>
+                </>
+              )}
             </div>
           </details>
 
@@ -1586,6 +1694,42 @@ export default function ProjectDetailPage() {
                 <p>Engine used: {ENGINE_LABELS[notes.engine_used] ?? notes.engine_used}</p>
                 <p>Mode: {ROUTING_MODE_LABELS[notes.routing_mode ?? ""] ?? "Melody only"}</p>
                 <p>Fallback: {notes.fallback_reason ?? "none"}</p>
+                <p>
+                  Warnings:{" "}
+                  {[
+                    notes.difficulty &&
+                    notes.difficulty !== "Simple melody" &&
+                    notes.difficulty !== "No notes detected"
+                      ? notes.difficulty
+                      : null,
+                    ...(notes.warnings ?? []),
+                  ]
+                    .filter(Boolean)
+                    .join("; ") || "none"}
+                </p>
+              </div>
+            )}
+            {notes?.arrangement_source && (
+              <div
+                className="mt-2 rounded border border-blue-200 bg-blue-50 p-2 text-xs text-blue-900"
+                data-testid="arrangement-status"
+              >
+                <p>Mode: Solo arrangement</p>
+                <p>
+                  Source:{" "}
+                  {ARRANGEMENT_SOURCE_LABELS[notes.arrangement_source] ??
+                    notes.arrangement_source}
+                </p>
+                <p>
+                  Engine:{" "}
+                  {notes.separation_engine === "demucs" ? "Demucs + " : ""}
+                  {ENGINE_LABELS[notes.engine_used ?? ""] ?? notes.engine_used}
+                </p>
+                <p>
+                  Arrangement focus:{" "}
+                  {ARRANGEMENT_FOCUS_LABELS[notes.arrangement_focus ?? ""] ??
+                    notes.arrangement_focus}
+                </p>
                 <p>
                   Warnings:{" "}
                   {[
