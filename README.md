@@ -2,19 +2,19 @@
 
 AI music arranging and rehearsal app that turns songs into editable lead sheets, solo sheets, band charts and custom arrangements.
 
-## v0.9.4 — Engine Lab: comparing transcription engines honestly
+## v0.9.5 — Smart transcription routing
 
 This is the smallest possible working prototype: a local web app where you upload an audio
 file and the backend runs **real audio-to-pitch transcription**. Everything runs on your own
 computer — no accounts, no payments, no cloud services, no data leaves your machine.
 
-v0.9.4 adds the **Engine Lab** (`/engine-lab`, linked quietly at the bottom of the home
-page): a separate developer tool for running each transcription engine against the same
-audio and comparing them side by side — engine name, availability, processing time, note
-count, overlapping notes, chord groups, pitch range, warnings, and MIDI/JSON downloads for
-each run, plus a small piano-roll debug view. It's isolated from the main app on purpose:
-nothing it does can affect a real project's transcription. See **Engine Lab** below for
-full details, what was investigated, and how to run the benchmarks.
+v0.9.5 uses what the Engine Lab found (v0.9.4) to make BandChart choose transcription
+settings automatically instead of leaving it all to guesswork: which engine to try, how many
+simultaneous notes to allow, and what to tell you when it falls back or the audio is dense.
+The **Engine Lab** (`/engine-lab`, linked quietly at the bottom of the home page) also
+gained a "Use this output" button — run a couple of engines against a real project's audio,
+compare them, and adopt whichever one actually did better. See **Smart transcription
+routing** and **Engine Lab** below for full details.
 
 Two detection engines are selectable in the main app (v0.9.3):
 
@@ -115,6 +115,16 @@ Two detection engines are selectable in the main app (v0.9.3):
   a moment was simplified, falls back with a clear message when the model is missing or
   finds nothing usable, and the tab stays melody-first (top note of each chord, with a
   note saying so). This is NOT full band or complex-piano transcription
+- **Smart transcription routing** (v0.9.5): Piano now defaults to multiple-note
+  detection in BOTH Direct transcription and Solo arrangement (grand staff either way);
+  Guitar and Violin can use multiple-note detection too, with Violin capped at 2
+  simultaneous notes (double-stops) and a caution note for both; Bass and the
+  melody-first instruments (Alto Sax, Trumpet, Voice, and others) stay melody only by
+  default. Every transcribed project shows an honest status block under the audio
+  player — "Engine used", "Mode", "Fallback" (e.g. "Basic Pitch failed, used
+  melody-only fallback." when it genuinely degrades), and "Warnings" (a rough density
+  read plus any instrument-specific caution) — never hidden, so you always know what
+  actually ran
 - **Auto-scroll** (on by default, toggleable): the sheet music, piano roll and note table
   keep the current note in view while playing
 - **Fix wrong notes** (v0.8, chord-aware since v0.9.3): the note table is editable —
@@ -148,7 +158,58 @@ songs (tab stays melody-first).
 
 ---
 
-## Engine Lab (v0.9.4)
+## Smart transcription routing (v0.9.5)
+
+Instead of one fixed engine for everything, BandChart now decides how to transcribe based
+on the instrument, the mode (Direct transcription vs Solo arrangement), and your Note
+detection setting — and always tells you exactly what it decided.
+
+**Which engine/mode is used for each instrument:**
+
+| Instrument | Direct transcription | Solo arrangement |
+| --- | --- | --- |
+| **Piano** | Basic Pitch, multiple notes (auto-selected), up to 4 at once, grand staff | Basic Pitch, multiple notes (auto-selected), up to 4 at once, grand staff |
+| **Guitar** | Melody only (pYIN) by default; multiple notes if you choose it | Melody only by default; multiple notes if you choose it — shows "Guitar chord/tab output is experimental. TAB may show the main playable line first." TAB always stays melody-first |
+| **Bass** | Melody only (pYIN) by default; no chordal mode yet | Same — melody-first, bass TAB unaffected |
+| **Violin** | Melody only (pYIN) by default; multiple notes if you choose it | Melody only by default; multiple notes if you choose it, capped at **2 simultaneous notes (double-stops)** — shows "Violin output is limited to melody and simple double-stops for now." |
+| Alto Sax, Trumpet, Voice, and everything else (Flute, Tenor Sax, Clarinet, Ukulele, Concert pitch) | Melody only (pYIN) | Melody only (pYIN) |
+
+Every instrument keeps the manual "Note detection" Advanced setting — the table above is
+just the pre-selected default; you can always switch it.
+
+**How the fallback chain works** (unchanged engines, smarter reporting): when Multiple
+notes is requested, BandChart tries Basic Pitch first, then the built-in CQT detector if
+Basic Pitch isn't installed or fails, and finally plain melody-only pYIN if everything
+else fails or finds nothing. Nothing about this chain is new — v0.9.5 just makes it
+visible via a status block under the audio player on every transcribed project:
+
+```
+Engine used: Basic Pitch
+Mode: Multiple notes
+Fallback: none
+Warnings: none
+```
+
+If Basic Pitch weren't available, "Engine used" would read "Built-in simple detector" and
+"Fallback" would explain why. If everything failed and it landed on melody-only, "Fallback"
+reads exactly **"Basic Pitch failed, used melody-only fallback."** — this is never hidden,
+so you always know what actually ran, not just what you asked for.
+
+**Audio difficulty warning**: the same status block's Warnings line also reports a rough
+density read — "Simple melody", "Some overlapping notes", or "Dense piano/audio — may need
+editing" when the polyphonic detector had to trim notes or the recording came back
+consistently low-confidence. It's deliberately rough (a handful of blunt signals, not a
+model) — treat it as a hint to check the note editor, not a verdict.
+
+**C major chord gate** (the pass/fail basic test — see Testing below): uploading a clean
+C major chord (C4+E4+G4) with Piano + Direct transcription, or Piano + Solo arrangement,
+must detect all three notes together as one chord group, with JSON showing overlapping
+notes and MIDI/Play Along sounding them together. This is verified automatically before
+every release.
+
+---
+
+## Engine Lab (v0.9.4, "Use this output" added in v0.9.5)
 
 BandChart's note detection is genuinely hard to get right, especially on real piano
 recordings — see "Mrs Magic" below. Rather than keep swapping the main engine and hoping,
@@ -156,8 +217,10 @@ v0.9.4 adds a small, separate **Engine Lab** for comparing engines honestly on t
 audio, side by side, with real numbers.
 
 **Open it:** click the quiet "Engine Lab" link at the bottom of the home page, or go to
-`/engine-lab` directly. It is a developer tool, not part of the normal workflow — nothing
-it does touches a real project's transcription.
+`/engine-lab` directly. It is a developer tool, not part of the normal workflow. Running
+engines here is read-only and never touches a real project — the one exception is the
+explicit "Use this output" button (v0.9.5, step 5 below), the only way a lab result
+becomes a project's active transcription.
 
 **What it does:**
 1. Choose audio: one of five **built-in synthetic test clips** (A4 tone, C major chord,
@@ -174,6 +237,13 @@ it does touches a real project's transcription.
    rank engines on clean audio, not a rigorous benchmark
 4. If an engine isn't installed or available, it's shown grayed out with a clear
    **"Engine unavailable: [reason]"** message instead of being hidden or crashing
+5. **(v0.9.5) "Use this output"**: run a couple of engines against an existing project's
+   audio, compare them, then click **Use this output** on whichever result actually did
+   better — it becomes that project's active transcription (JSON/MIDI rewritten, "Reset
+   to original transcription" now resets back to this applied result, manual chord
+   markers clear the way a fresh transcribe would). Only works for a run made from that
+   exact project's own audio — a fixture or a direct-upload run can't be applied, on
+   purpose, so a lab experiment can never accidentally overwrite the wrong project
 
 **Engines available in the lab today:**
 
@@ -237,12 +307,15 @@ pitches) — a real, honest limitation, not hidden here.
 
 **Mrs Magic hard piano benchmark:** a genuinely hard real piano recording
 (`https://youtu.be/yO_OD7Yx2j8`), used as the honest reality check that synthetic test
-clips can't provide. Import it as a normal project (upload or YouTube import), then pick
-it under "An existing project's audio" in the lab. **This could not be run from this
-cloud environment** — YouTube blocks import attempts from cloud servers (same limitation
-as the rest of the app; see "Run locally on Mac for YouTube import" below). Run it on a
-real Mac and compare Basic Pitch against CQT/pYIN there; no engine is expected to solve
-it perfectly — the honest goal is to see how far off each one is.
+clips can't provide. Import it as a normal project (Piano + Direct transcription — the
+routing table above sends it through the strongest available route, Basic Pitch with up
+to 4 simultaneous notes), then pick it under "An existing project's audio" in the lab to
+compare engines and optionally apply the best one. **This still could not be run from
+this cloud environment** — YouTube blocks import attempts from cloud servers (same
+limitation as the rest of the app; see "Run locally on Mac for YouTube import" below).
+Run it on a real Mac; no engine is expected to solve it perfectly, and v0.9.5 does NOT
+claim it's solved — the honest goal is an editable, non-collapsed-to-one-line result you
+can clean up, not a perfect transcription.
 
 ---
 
@@ -684,6 +757,14 @@ probability for that note, averaged over its frames). Polyphonic notes may also 
 melody note the detector split at a genuine re-strike) and `source` (which detector
 produced it: `"basic_pitch"`, `"cqt"` or `"pyin"`).
 
+The top-level `/projects/{id}/notes` response also carries v0.9.5's routing status,
+always present: `engine_used` (`"basic_pitch"` | `"cqt"` | `"pyin"`), `routing_mode`
+(`"melody_only"` | `"multiple_notes"` | `"double_stops"`), `fallback_reason` (a string
+when a Multiple-notes request degraded to a different engine, else `null`), `warnings`
+(a list of strings — engine messages plus any instrument-specific caution), and
+`difficulty` (a rough density read, one of `"Simple melody"`, `"Some overlapping
+notes"`, `"Dense piano/audio — may need editing"`, `"No notes detected"`).
+
 ### Engine Lab endpoints (v0.9.4, separate from the main pipeline)
 
 | Method | Path | Description |
@@ -696,3 +777,4 @@ produced it: `"basic_pitch"`, `"cqt"` or `"pyin"`).
 | POST | `/engine-lab/runs` | Run one engine — `{"engine": "pyin"\|"basic_pitch"\|"cqt", "source": {"kind": "project"\|"fixture"\|"upload", ...}}` |
 | GET | `/engine-lab/runs` / `/engine-lab/runs/{id}` | List recent runs / get one run's full result |
 | GET | `/engine-lab/runs/{id}/download/midi` \| `/download/json` | Download a run's output |
+| POST | `/engine-lab/runs/{id}/apply/{project_id}` | v0.9.5: make this run's notes the project's active transcription. 400 if the run's source wasn't that exact project's own audio, or if the run failed |

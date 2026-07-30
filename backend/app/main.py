@@ -355,6 +355,8 @@ def transcribe(project_id: str) -> Project:
             project_name=project.name,
             source_audio_filename=project.audio_filename,
             detection=project.note_detection or "melody",
+            instrument=project.instrument or "concert",
+            mode=project.mode or "direct_transcription",
         )
     except Exception as exc:  # noqa: BLE001
         message = _friendly_transcription_error(exc)
@@ -407,6 +409,16 @@ def _save_working_notes(project: Project, notes: list[dict]) -> dict:
     existing_chords: list[dict] = []
     existing_detection = "melody"
     existing_detection_note = None
+    # v0.9.5 smart routing status — a note edit or reset changes WHICH
+    # notes are stored, never which engine produced the original detection,
+    # so these are preserved exactly like chords/detection/detection_note.
+    existing_routing_fields = {
+        "engine_used": "pyin",
+        "routing_mode": "melody_only",
+        "fallback_reason": None,
+        "warnings": [],
+        "difficulty": None,
+    }
     json_path = storage.transcription_json_path(project.id)
     if json_path.exists():
         try:
@@ -414,6 +426,9 @@ def _save_working_notes(project: Project, notes: list[dict]) -> dict:
             existing_chords = existing.get("chords", [])
             existing_detection = existing.get("detection", "melody")
             existing_detection_note = existing.get("detection_note")
+            for key in existing_routing_fields:
+                if key in existing:
+                    existing_routing_fields[key] = existing[key]
         except Exception:
             existing_chords = []
 
@@ -428,6 +443,7 @@ def _save_working_notes(project: Project, notes: list[dict]) -> dict:
         "chords": existing_chords,
         "detection": existing_detection,
         "detection_note": existing_detection_note,
+        **existing_routing_fields,
     }
     storage.transcription_json_path(project.id).write_text(json.dumps(data, indent=2))
     write_midi_from_notes(notes, storage.midi_path(project.id))

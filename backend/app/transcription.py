@@ -214,6 +214,8 @@ def run_transcription(
     project_name: str,
     source_audio_filename: str,
     detection: str = "melody",
+    instrument: str = "concert",
+    mode: str = "direct_transcription",
 ) -> dict[str, Any]:
     """Run pitch transcription on audio_path, write MIDI + notes JSON.
 
@@ -222,19 +224,42 @@ def run_transcription(
     (app/polyphonic.py); on failure or an empty result it falls back to
     melody-only and records why in "detection_note".
 
+    v0.9.5: instrument + mode feed app/routing.py's smart routing — mainly
+    an instrument-specific simultaneous-note cap (e.g. violin double-stops)
+    and an instrument caution note (e.g. guitar's experimental tab warning).
+    The result also reports engine_used/routing_mode/fallback_reason/
+    warnings/difficulty so the caller can show an honest status line —
+    never hidden from the user.
+
     Returns the transcription result dict (same shape written to json_out_path).
     """
+    from app.routing import describe_difficulty, resolve_routing
+
+    plan = resolve_routing(instrument, mode, detection)
+
     detection_used = "melody"
     detection_note: str | None = None
+    engine_used = "pyin"
+    fallback_reason: str | None = None
+    engine_messages: list[str] = []
     notes: list[dict[str, Any]] | None = None
 
     if detection == "poly":
         try:
             from app.polyphonic import detect_notes_poly
 
-            notes, poly_messages = detect_notes_poly(audio_path)
+            notes, poly_messages = detect_notes_poly(
+                audio_path, max_polyphony=plan.max_polyphony
+            )
             if notes:
                 detection_used = "poly"
+                engine_used = notes[0].get("source") or "basic_pitch"
+                engine_messages = poly_messages
+                if engine_used == "cqt":
+                    fallback_reason = (
+                        "Basic Pitch unavailable — used the built-in simple "
+                        "detector instead."
+                    )
                 if poly_messages:
                     detection_note = " ".join(poly_messages)
             else:
@@ -247,6 +272,7 @@ def run_transcription(
                     # Keep the engine's own explanation (e.g. that the Basic
                     # Pitch model isn't installed) — it says WHY it was empty.
                     detection_note = " ".join([*poly_messages, detection_note])
+                    engine_messages = poly_messages
         except Exception as exc:  # noqa: BLE001
             notes = None
             detection_note = (
@@ -256,9 +282,28 @@ def run_transcription(
 
     if notes is None:
         notes, melody_messages = _detect_notes(audio_path)
+        engine_used = "pyin"
+        engine_messages = melody_messages
+        if detection == "poly":
+            # A poly request that ended up here is a genuine fallback.
+            fallback_reason = "Basic Pitch failed, used melody-only fallback."
         if melody_messages:
             extra = " ".join(melody_messages)
             detection_note = f"{detection_note} {extra}" if detection_note else extra
+
+    difficulty = describe_difficulty(notes, engine_messages, engine_used)
+
+    # The Mode line should reflect what actually ran, not just what was
+    # requested — a poly request that fell back to melody says so via
+    # fallback_reason, and Mode itself switches to melody_only so the two
+    # lines never look contradictory.
+    routing_mode = plan.routing_mode
+    if engine_used == "pyin" and detection == "poly":
+        routing_mode = "melody_only"
+
+    warnings = list(engine_messages)
+    if plan.instrument_note and engine_used != "pyin":
+        warnings.append(plan.instrument_note)
 
     write_midi_from_notes(notes, midi_out_path)
 
@@ -275,6 +320,15 @@ def run_transcription(
         # caveat (fallbacks, simplifications) to show the user.
         "detection": detection_used,
         "detection_note": detection_note,
+        # v0.9.5 smart routing status (app/routing.py) — an honest status
+        # line the UI shows, never hidden: which engine actually ran, the
+        # resolved mode, why it fell back (if it did), any warnings, and a
+        # rough density/difficulty read.
+        "engine_used": engine_used,
+        "routing_mode": routing_mode,
+        "fallback_reason": fallback_reason,
+        "warnings": warnings,
+        "difficulty": difficulty,
     }
 
     json_out_path.parent.mkdir(parents=True, exist_ok=True)

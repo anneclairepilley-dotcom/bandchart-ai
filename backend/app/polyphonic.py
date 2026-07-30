@@ -114,10 +114,10 @@ def _assign_groups(
     if trimmed:
         messages.append(
             "Too many simultaneous notes were detected in places — only the "
-            "strongest 4 were kept (simplified output)."
+            f"strongest {max_polyphony} were kept (simplified output)."
         )
-        # When most moments overflow the 4-note cap, the recording is beyond
-        # what this first polyphonic pass can represent — say so plainly.
+        # When most moments overflow the cap, the recording is beyond what
+        # this first polyphonic pass can represent — say so plainly.
         if total_groups and trimmed_groups >= max(3, total_groups // 2):
             messages.append("This audio is too dense for the current model.")
     result.sort(key=lambda n: (n["start_time"], n["pitch"]))
@@ -205,7 +205,9 @@ def _suppress_harmonics(notes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return kept
 
 
-def _detect_with_basic_pitch(audio_path: Path) -> tuple[list[dict[str, Any]], list[str]]:
+def _detect_with_basic_pitch(
+    audio_path: Path, max_polyphony: int = MAX_POLYPHONY
+) -> tuple[list[dict[str, Any]], list[str]]:
     """Run the Basic Pitch model (ONNX, CPU) and post-filter its notes."""
     from basic_pitch.inference import predict  # heavy import kept lazy
 
@@ -244,23 +246,29 @@ def _detect_with_basic_pitch(audio_path: Path) -> tuple[list[dict[str, Any]], li
     notes = _suppress_harmonics(notes)
     dropped_weak += before_harmonics - len(notes)
 
-    notes, messages = _assign_groups(notes)
+    notes, messages = _assign_groups(notes, max_polyphony=max_polyphony)
     if dropped_weak:
         messages.append("Low-confidence notes were removed.")
     return notes, messages
 
 
-def detect_notes_poly(audio_path: Path) -> tuple[list[dict[str, Any]], list[str]]:
+def detect_notes_poly(
+    audio_path: Path, max_polyphony: int = MAX_POLYPHONY
+) -> tuple[list[dict[str, Any]], list[str]]:
     """Detect simultaneous notes: Basic Pitch model first, CQT fallback.
+
+    max_polyphony caps how many notes can share a chord group (v0.9.5:
+    routing.py passes a lower cap for instruments limited to double-stops,
+    e.g. violin=2; everything else keeps the default of 4).
 
     Returns (notes, messages). Notes may share or overlap start times and
     are sorted by (start_time, pitch); simultaneous notes share a chord
     group id. Messages report which engine ran and any simplifications.
     """
     try:
-        return _detect_with_basic_pitch(audio_path)
+        return _detect_with_basic_pitch(audio_path, max_polyphony=max_polyphony)
     except ImportError:
-        notes, messages = _detect_with_cqt(audio_path)
+        notes, messages = _detect_with_cqt(audio_path, max_polyphony=max_polyphony)
         messages.insert(
             0,
             "The Basic Pitch model isn't installed, so the built-in simple "
@@ -268,7 +276,7 @@ def detect_notes_poly(audio_path: Path) -> tuple[list[dict[str, Any]], list[str]
         )
         return notes, messages
     except Exception as exc:  # noqa: BLE001
-        notes, messages = _detect_with_cqt(audio_path)
+        notes, messages = _detect_with_cqt(audio_path, max_polyphony=max_polyphony)
         messages.insert(
             0,
             f"The Basic Pitch model failed ({exc}) — the built-in simple "
@@ -277,8 +285,10 @@ def detect_notes_poly(audio_path: Path) -> tuple[list[dict[str, Any]], list[str]
         return notes, messages
 
 
-def _detect_with_cqt(audio_path: Path) -> tuple[list[dict[str, Any]], list[str]]:
-    """v0.9.2 fallback: up to MAX_POLYPHONY notes per onset segment via CQT."""
+def _detect_with_cqt(
+    audio_path: Path, max_polyphony: int = MAX_POLYPHONY
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """v0.9.2 fallback: up to max_polyphony notes per onset segment via CQT."""
     y, sr = librosa.load(str(audio_path), sr=SAMPLE_RATE, mono=True)
     if y.size == 0:
         return [], []
@@ -346,9 +356,9 @@ def _detect_with_cqt(audio_path: Path) -> tuple[list[dict[str, Any]], list[str]]
             if is_harmonic:
                 continue
             accepted.append((bin_index, value))
-        if len(accepted) > MAX_POLYPHONY:
+        if len(accepted) > max_polyphony:
             overflowed = True
-            accepted = accepted[:MAX_POLYPHONY]
+            accepted = accepted[:max_polyphony]
 
         seg_length_s = (seg_end - seg_start) * frame_time
         start_s = seg_start * frame_time
@@ -365,10 +375,10 @@ def _detect_with_cqt(audio_path: Path) -> tuple[list[dict[str, Any]], list[str]]
             cqt_note["source"] = "cqt"
             notes.append(cqt_note)
 
-    notes, messages = _assign_groups(notes)
+    notes, messages = _assign_groups(notes, max_polyphony=max_polyphony)
     if overflowed and not messages:
         messages.append(
-            "Some moments had more than 4 simultaneous notes — only the "
-            "strongest 4 were kept."
+            f"Some moments had more than {max_polyphony} simultaneous notes — "
+            f"only the strongest {max_polyphony} were kept."
         )
     return notes, messages
