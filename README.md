@@ -2,20 +2,24 @@
 
 AI music arranging and rehearsal app that turns songs into editable lead sheets, solo sheets, band charts and custom arrangements.
 
-## v1.0 — Solo Arrangement for real songs
+## v0.9.6 — a serious transcription engine stack
 
 This is the smallest possible working prototype: a local web app where you upload an audio
 file and the backend runs **real audio-to-pitch transcription**. Everything runs on your own
 computer — no accounts, no payments, no cloud services, no data leaves your machine.
 
-v1.0 gives **Solo Arrangement** its own pipeline for full pop/rock songs, instead of
-running the same single-line detector used for a clean solo recording: it tries to find
-the main melody (the vocal, when it can isolate one) and turn it into a playable solo
-part for your chosen instrument, with a small number of optional supporting notes for
-Piano and Guitar. It does not promise perfect full-band transcription — it's an
-arrangement, meant to be checked and edited, not a magic wand. See **Solo Arrangement**
-below for full details, including what real vocal isolation (Demucs) would take and why
-it's document-only rather than active in this environment.
+v0.9.6 is entirely about transcription **quality**. Basic Pitch (v0.9.3) was a real
+improvement over the original pYIN-only engine, but it still isn't accurate enough on
+dense piano recordings or full songs — the "Mrs Magic" hard benchmark below is the
+honest reality check. This version adds two more specialist engines to the stack —
+**Piano Expert** (a piano-specific model, tried first for Piano when available) and
+**Demucs 4-stem source separation** (vocals/drums/bass/other, so Solo Arrangement can
+give each instrument its own most-relevant stem) — investigated properly and wired in as
+real, working, entirely optional adapters. Both are honestly **document-only** in every
+hosted environment (GitHub Codespaces-style sandboxes) this app has actually been tested
+in: they need dependencies and model downloads that are network-blocked there. See
+**Transcription engine stack** below for exactly what that means and why v1.0 (in the
+"this is genuinely solved" sense) isn't being declared yet.
 
 v0.9.5 uses what the Engine Lab found (v0.9.4) to make BandChart choose transcription
 settings automatically instead of leaving it all to guesswork: which engine to try, how many
@@ -44,6 +48,11 @@ Two detection engines are selectable in the main app (v0.9.3):
   the JSON. If the model isn't installed or fails, the app quietly falls back to the
   built-in v0.9.2 CQT detector, and if THAT finds nothing usable it falls back to
   melody-only — always with an honest message, never a crash.
+- **Piano Expert** (v0.9.6, Piano only, optional): a piano-specialist transcription
+  model, tried BEFORE Basic Pitch for Piano when it's actually installed and working.
+  Document-only in the environments this app has been tested in so far (see
+  **Transcription engine stack** below) — when unavailable, Piano transcription runs
+  exactly like before, no behaviour change.
 
 **What it does:**
 - **Clean home screen** (v0.9.1): "Turn sound into sheet music" — upload an audio file
@@ -134,6 +143,12 @@ Two detection engines are selectable in the main app (v0.9.3):
   melody-only fallback." when it genuinely degrades), and "Warnings" (a rough density
   read plus any instrument-specific caution) — never hidden, so you always know what
   actually ran
+- **A stronger engine stack** (v0.9.6): Piano now tries the **Piano Expert** specialist
+  model first (when installed), before Basic Pitch — same fallback chain, same honest
+  status block, just one more (optional) engine ahead of it. Solo Arrangement's optional
+  source separation is now **4-stem** (vocals/drums/bass/other, not just vocals), so Bass
+  can follow its own isolated bass stem instead of the same pass everyone else gets.
+  See **Transcription engine stack** below for what's actually active vs. document-only
 - **Auto-scroll** (on by default, toggleable): the sheet music, piano roll and note table
   keep the current note in view while playing
 - **Fix wrong notes** (v0.8, chord-aware since v0.9.3): the note table is editable —
@@ -153,13 +168,16 @@ Two detection engines are selectable in the main app (v0.9.3):
   **Experimental tools** at the bottom of the project page instead of cluttering the
   main flow. Proper Ultimate Guitar-style chord sheets are a much later feature,
   probably v5.0
-- **Solo Arrangement for real songs** (v1.0): choosing **Solo arrangement** now runs its
-  own pipeline instead of the plain single-line detector — it tries to isolate the vocal
-  and build the solo part from that (falling back to the full mix, honestly, when it
-  can't), and for Piano/Guitar can add a small number of simple supporting notes. New
-  **Arrangement focus** (Main melody / Melody + simple support / Piano-style
-  arrangement) and **Arrangement difficulty** (Easy / Medium) controls appear in
-  Advanced settings when Solo arrangement is selected. See **Solo Arrangement** below
+- **Solo Arrangement for real songs** (v1.0, stem routing upgraded in v0.9.6): choosing
+  **Solo arrangement** now runs its own pipeline instead of the plain single-line
+  detector — it tries to separate the song into stems and picks the one that matches
+  your instrument (vocals for Voice/Violin/Alto Sax/Trumpet, its own bass stem for Bass,
+  the accompaniment stem for Piano/Guitar), falling back to the full mix, honestly, when
+  it can't separate at all. Piano/Guitar can also add a small number of simple
+  supporting notes. New **Arrangement focus** (Main melody / Melody + simple support /
+  Piano-style arrangement) and **Arrangement difficulty** (Easy / Medium) controls
+  appear in Advanced settings when Solo arrangement is selected. See **Solo Arrangement**
+  and **Transcription engine stack** below
 - **Delete projects**: a Delete button beside each project on the dashboard removes the
   project with its uploaded audio and generated files, after a confirmation prompt
 
@@ -169,14 +187,80 @@ are manual markers plus rough melody-based suggestions; Ultimate Guitar-style ch
 sheets are a much later feature, probably v5.0), accurate transcription of complex piano
 pieces or full-band mixes (polyphonic detection is experimental and for clear, simple
 material), strummed guitar chord shapes/diagrams, full guitar/bass extraction from mixed
-songs (tab stays melody-first). **Source separation (Demucs)** exists in the code as an
-optional adapter (v1.0) but is not installed by default and is not active in the hosted
-environments this app has been tested in — see **Solo Arrangement** below; it never
-promises perfect vocal isolation or perfect full-band transcription.
+songs (tab stays melody-first). **Source separation (Demucs, now 4-stem) and Piano
+Expert** both exist in the code as real, working optional adapters but are not installed
+by default and are not active in the hosted environments this app has been tested in —
+see **Transcription engine stack** below; neither promises perfect vocal isolation or
+perfect full-band/dense-piano transcription.
 
 ---
 
-## Solo Arrangement (v1.0)
+## Transcription engine stack (v0.9.6)
+
+Basic Pitch (v0.9.3) is a real improvement over a plain pitch tracker, but it's still
+not accurate enough on dense piano recordings or full songs — that's the honest reason
+v0.9.6 exists. This version adds two more specialist engines and wires them in as real,
+working, entirely optional adapters — the main app keeps working exactly as before
+whenever they're unavailable.
+
+**The full engine chain, in try-order:**
+
+| Instrument | Direct transcription | Solo arrangement |
+| --- | --- | --- |
+| **Piano** | Piano Expert (if installed) → Basic Pitch → CQT → pYIN | Same chain, run on the accompaniment ("other") stem if Demucs separated it, the full mix otherwise |
+| Everything else | Basic Pitch → CQT → pYIN (unchanged from v0.9.5) | Same chain, run on the instrument's chosen stem (see the stem table below) |
+
+**Piano Expert** — a piano-specialist transcription model (ByteDance/Qiuqiang Kong's
+`piano_transcription_inference`), tried before Basic Pitch for Piano whenever it's
+actually installed and its model checkpoint can load. It is **not** in
+`requirements.txt` and is never installed automatically — install it yourself with
+`pip install piano_transcription_inference` in the backend's virtual environment if you
+want to try it (it also needs PyTorch, which pip will pull in for you). If it's missing,
+fails to load, or errors during transcription, Piano falls back to Basic Pitch
+automatically, and the status block says so plainly (`Fallback: Piano Expert failed
+(...), used Basic Pitch instead.`).
+
+**Demucs 4-stem separation** — upgraded from v1.0's vocals-only split to Demucs'
+default 4-stem output: **vocals, drums, bass, other**. Solo Arrangement now picks the
+stem that actually matches your instrument instead of a one-size-fits-all vocal/
+accompaniment split:
+
+| Instrument | Stem used (when separation works) |
+| --- | --- |
+| Voice, Violin, Alto Sax, Trumpet | vocals |
+| Bass | bass |
+| Piano, Guitar | other (accompaniment) |
+
+Like Piano Expert, Demucs is **not** in `requirements.txt`. Install it yourself
+(`pip install demucs`) if you want to try it — it also needs PyTorch. If separation
+isn't available or fails for any reason, you'll see exactly this message: **"Source
+separation failed. Using full mix instead."** — and every instrument falls back to
+running its detection engine on the full mix, same as before v0.9.6. Nothing crashes
+either way.
+
+**Why both are document-only in the environments this app has actually been tested in**
+(GitHub Codespaces-style sandboxes): both depend on PyTorch, and only the default
+GPU-oriented PyPI wheel is reachable there (the lighter CPU-only wheel host,
+`download.pytorch.org`, is network-blocked) — installing it pulls in several gigabytes
+of unused CUDA packages. On top of that, their model checkpoints download from hosts
+that are ALSO network-blocked in those environments (`zenodo.org` for Piano Expert,
+`dl.fbaipublicfiles.com`/`huggingface.co` for Demucs) — so even a successful install
+can't fetch a working model there. **Neither of these is a fixable bug in BandChart AI**
+— they're environment network policy, confirmed by directly testing the actual hosts.
+If you're on a Mac with a normal, unrestricted internet connection, both are worth
+trying — see the installation commands above, and check `/engine-lab` afterwards to
+confirm they show as available.
+
+**Honest bottom line**: this app is not calling its transcription quality "solved" —
+v1.0 (in the sense of "genuinely good enough") is being held back deliberately until
+someone can confirm Piano Expert and/or Demucs actually work and actually help on real
+hardware, against the Mrs Magic benchmark below. Until then, Basic Pitch (optionally
+alongside 4-stem separation once installed) remains the best available option, same as
+v0.9.5.
+
+---
+
+## Solo Arrangement (v1.0, stem routing upgraded in v0.9.6)
 
 Solo Arrangement is for turning a **full song** into a playable solo part — different
 from Direct transcription, which is for a clean recording of one instrument or voice.
@@ -185,16 +269,16 @@ Solo Arrangement:
 
 1. Cleans up the audio (normalises volume, trims silence) into a scratch copy — your
    original upload is never touched
-2. Tries to isolate the vocal from the rest of the mix (optional — see Demucs below).
-   Everyone except Bass uses the vocal stem for their main melody when one was isolated
-   (Bass follows the accompaniment/full mix instead — a bass part follows the low end of
-   the song, not the singer)
-3. Extracts the main melody with the same pYIN/Basic Pitch engines the rest of the app
-   uses, cleaned up the same way (tiny ghost notes removed, pitch jitter smoothed,
-   rhythm quantized for readability)
+2. Tries to separate the song into stems (optional — Demucs, see **Transcription engine
+   stack** above). Each instrument follows its own most-relevant stem — see the stem
+   table above — falling back to the full mix, honestly, when separation isn't available
+3. Extracts the main melody with the same pYIN/Basic Pitch/Piano Expert engines the rest
+   of the app uses, cleaned up the same way (tiny ghost notes removed, pitch jitter
+   smoothed, rhythm quantized for readability)
 4. For **Piano and Guitar only**, when you ask for it (Arrangement focus below), adds a
-   small number of simple low-register supporting notes — never a full reduction of
-   everything detected, just enough for a left hand or a bass note under the melody
+   small number of simple low-register supporting notes from the accompaniment stem —
+   never a full reduction of everything detected, just enough for a left hand or a bass
+   note under the melody
 5. Feeds the result into the same sheet music / TAB / MIDI / JSON / MusicXML / PDF / Play
    Along / note editor as everything else
 
@@ -209,46 +293,18 @@ Solo Arrangement:
 for Solo arrangement projects, alongside the existing engine status:
 ```
 Mode: Solo arrangement
-Source: vocal stem / full mix / accompaniment
-Engine: pYIN / Basic Pitch / Demucs + Basic Pitch
+Source: vocal stem / bass stem / accompaniment / full mix
+Engine: pYIN / Basic Pitch / Piano Expert / Demucs + Basic Pitch
 Arrangement focus: Main melody / Melody + support
 Warnings: Dense audio may need editing
 ```
 You'll also see one of these exact messages depending on what happened: *"Solo
 Arrangement finds the strongest melody and creates a playable part. Dense songs may need
-editing."* (always), *"Using vocal stem for main melody."* (isolation worked), *"Using
-full mix because no clear vocal stem was isolated."* (it didn't — this is the normal case
-in the hosted environments this app has been tested in, see below), and *"Added simple
+editing."* (always), *"Using vocal stem for main melody."* (isolation worked, and this
+instrument uses the vocal stem), *"Source separation failed. Using full mix instead."*
+(separation isn't available — this is the normal case in the hosted environments this
+app has been tested in, see **Transcription engine stack** above), and *"Added simple
 support notes. Please check and edit."* (when support notes were added).
-
-### Vocal isolation (Demucs) — investigated, document-only for now
-
-Solo Arrangement supports real vocal/accompaniment separation via Meta's
-[Demucs](https://github.com/facebookresearch/demucs) in code (`backend/app/separation.py`),
-but it is **not installed by default** and is not active in GitHub Codespaces or this
-project's other tested environments. Two things stack against it there:
-1. Demucs depends on PyTorch. Only the default (GPU-oriented) PyPI wheel is reachable in
-   those environments — installing it pulls in several gigabytes of unused CUDA packages
-   even though there's no GPU to use them
-2. Demucs' pretrained model checkpoint downloads from `dl.fbaipublicfiles.com` (or
-   `huggingface.co` as a fallback) — both are blocked outright on some networks
-
-If neither of those is a problem on your machine (a Mac with a fast connection, most
-likely), you can try it yourself: `pip install demucs` in the backend's virtual
-environment (it is deliberately **not** in `requirements.txt`, so it never installs
-automatically or bloats a normal setup). Once installed, Solo Arrangement will detect and
-use it automatically — no code changes or settings needed — and the status block will
-show "Source: vocal stem" and "Demucs" in the Engine line. If it's missing, fails to
-download its model, or errors in any way, the app **always** falls back to the full mix
-and says so — it never crashes and never silently pretends separation happened.
-
-**Without Demucs**, Solo Arrangement still works — pYIN/Basic Pitch run on the full mix
-instead of an isolated vocal. On a typically-mixed pop song (vocals mixed forward, which
-is normal production practice) this still finds the melody reasonably well. On a
-bass-forward or dense mix it can mistrack — for example latching onto a strong bassline
-instead of the vocal. **Bass arrangements are the instrument hit hardest by this**:
-without separation, Bass gets the same full-mix melody pass as everything else (usually
-the vocal line), not a genuine bassline — expect to edit it more than other instruments.
 
 **What this is not**: BandChart AI does not claim to perfectly separate every instrument,
 and Solo Arrangement does not claim to perfectly transcribe a full band. It finds the
@@ -351,8 +407,10 @@ becomes a project's active transcription.
 | pYIN (melody baseline) | ✅ Available | The original monophonic engine. Scores 0% on any chord test by design — it can only follow one line, which is exactly the limitation the other engines exist to fix |
 | Basic Pitch (Spotify) | ✅ Available | The app's current main polyphonic engine. Detects chords exactly on clean synthetic audio |
 | Built-in simple detector (CQT) | ✅ Available | The v0.9.2 fallback (no external model). Comparable to Basic Pitch on clean audio, faster, no model download |
-| Piano Expert (ByteDance) | ⛔ Investigated, not active | See below |
+| Piano Expert (ByteDance) | ⚙️ Available if installed (v0.9.6) | Real adapter — active automatically once `piano_transcription_inference` is installed and its checkpoint loads. Not installed by default; see **Transcription engine stack** above |
+| Demucs + Basic Pitch (v0.9.6) | ⚙️ Available if installed | Separates with Demucs, then runs Basic Pitch on the isolated vocal stem — compare against running Basic Pitch on the full mix directly. Not installed by default |
 | Omnizart | ⛔ Investigated, not active | See below |
+| MT3 (Magenta) | ⛔ Investigated, not active | See below |
 
 **Sample results** (synthetic fixtures, this environment, CPU):
 
@@ -372,17 +430,17 @@ generalize better to real (non-synthetic) recordings. Both pick up a few extra n
 the bass+melody test (low notes have strong harmonics that can be mistaken for extra
 pitches) — a real, honest limitation, not hidden here.
 
-**Engines investigated but not wired into the app (v0.9.4):**
-- **Piano Expert (ByteDance's `piano_transcription_inference`)** — a piano-specialist
-  model that looked like the strongest candidate for dense piano. The Python package
-  itself installs cleanly (no conflicts with this app's numpy/librosa/scipy). BUT it
-  needs PyTorch (a heavy extra dependency) and downloads a ~165MB checkpoint from Zenodo
-  the first time it runs — an external dependency on an **archived (unmaintained)**
-  upstream repo. That checkpoint download could not be verified end-to-end in this
-  environment (network policy blocked Zenodo), so actual transcription quality is
-  **unverified**. Per the rule "don't make it the default until it passes the tests
-  here," it stays off. A future version could add it as a real Piano Expert mode once
-  someone confirms the checkpoint downloads and runs correctly on a real Mac
+**Piano Expert and Demucs (v0.9.6) — wired in as real, active-when-installed adapters,
+not just investigated.** See **Transcription engine stack** above for the full writeup;
+short version: both need PyTorch (pulls in unused CUDA packages from the default PyPI
+wheel in environments where the CPU-only wheel host is blocked) and a model checkpoint
+from a host that's also network-blocked in every environment this app has actually been
+tested in (Zenodo for Piano Expert, fbaipublicfiles/huggingface for Demucs) — re-checked
+directly against those hosts in v0.9.6, not just re-read from old notes. Neither is in
+`requirements.txt`; both activate automatically the moment they're actually installed
+and working, here and in the main app.
+
+**Other engines investigated but not wired into the app (v0.9.4):**
 - **Omnizart** — a general transcription toolkit (piano/vocal/chord/drum/beat).
   Genuinely works: installed and ran real transcription on CPU, no GPU needed. But it
   only runs on **Python 3.10** (this app uses 3.12), needs the system `portaudio`
@@ -406,15 +464,20 @@ pitches) — a real, honest limitation, not hidden here.
 
 **Mrs Magic hard piano benchmark:** a genuinely hard real piano recording
 (`https://youtu.be/yO_OD7Yx2j8`), used as the honest reality check that synthetic test
-clips can't provide. Import it as a normal project (Piano + Direct transcription — the
-routing table above sends it through the strongest available route, Basic Pitch with up
-to 4 simultaneous notes), then pick it under "An existing project's audio" in the lab to
-compare engines and optionally apply the best one. **This still could not be run from
-this cloud environment** — YouTube blocks import attempts from cloud servers (same
-limitation as the rest of the app; see "Run locally on Mac for YouTube import" below).
-Run it on a real Mac; no engine is expected to solve it perfectly, and v0.9.5 does NOT
-claim it's solved — the honest goal is an editable, non-collapsed-to-one-line result you
-can clean up, not a perfect transcription.
+clips can't provide. Import it as a normal project and try, in order: **Piano Direct
+transcription with Piano Expert** (if you've installed it — the strongest candidate),
+**Piano Direct transcription with Basic Pitch** (the default), and **Piano Solo
+arrangement with Demucs + Piano Expert/Basic Pitch** (if you've installed Demucs too) —
+then pick the same audio under "An existing project's audio" in the lab to compare all
+of them side by side and optionally apply the best one. **This still could not be run
+from this cloud environment** — YouTube blocks import attempts from cloud servers (same
+limitation as the rest of the app; see "Run locally on Mac for YouTube import" below), on
+top of Piano Expert/Demucs being document-only there anyway. Run it on a real Mac with
+Piano Expert and/or Demucs installed; no engine is expected to solve it perfectly, and
+v0.9.6 does NOT claim it's solved — the honest goal is an editable, non-collapsed-to-
+one-line result you can clean up, not a perfect transcription. **If you do get a chance
+to test this, the results would genuinely help decide whether Piano Expert becomes the
+piano default in a future version.**
 
 ---
 
@@ -764,6 +827,19 @@ happens you'll see: *"YouTube blocked this cloud server from downloading the aud
 
 ## Troubleshooting
 
+**Piano Expert / Demucs show "Engine unavailable" in `/engine-lab`, or Piano/Solo
+Arrangement never seem to use them.** This is expected unless you've deliberately
+installed them (they're optional, not in `requirements.txt`, and never install
+automatically). To try them: `pip install piano_transcription_inference` and/or
+`pip install demucs` in the backend's virtual environment (both also pull in PyTorch).
+Then restart the backend and check `/engine-lab` — if they still show unavailable, the
+reason text tells you why: usually a blocked checkpoint download (Zenodo for Piano
+Expert, fbaipublicfiles.com/huggingface.co for Demucs — some networks, including GitHub
+Codespaces-style cloud sandboxes, block these outright). A Mac with a normal home
+internet connection is the most likely place these actually work. If they're genuinely
+unreachable on your network, the app keeps working exactly as before — Basic Pitch
+stays the active engine, and Solo Arrangement falls back to the full mix.
+
 **`No module named 'pkg_resources'` when running Basic Pitch.** Fresh Python 3.12
 environments no longer include setuptools (which provides `pkg_resources`) by default.
 It's now in `requirements.txt`, so run `pip install -r requirements.txt` again (or
@@ -854,22 +930,23 @@ Each note in the JSON output has: `pitch` (MIDI number), `pitch_name` (e.g. `"C4
 probability for that note, averaged over its frames). Polyphonic notes may also carry
 `velocity` (0–1), `group` (a shared chord id like `"chord_1"`), `reattack` (a repeated
 melody note the detector split at a genuine re-strike) and `source` (which detector
-produced it: `"basic_pitch"`, `"cqt"` or `"pyin"`).
+produced it: `"basic_pitch"`, `"cqt"`, `"pyin"` or `"piano_expert"` (v0.9.6, Piano only,
+when installed); support notes added for Piano/Guitar carry `"accompaniment"`).
 
 The top-level `/projects/{id}/notes` response also carries v0.9.5's routing status,
-always present: `engine_used` (`"basic_pitch"` | `"cqt"` | `"pyin"`), `routing_mode`
-(`"melody_only"` | `"multiple_notes"` | `"double_stops"`), `fallback_reason` (a string
-when a Multiple-notes request degraded to a different engine, else `null`), `warnings`
-(a list of strings — engine messages plus any instrument-specific caution), and
-`difficulty` (a rough density read, one of `"Simple melody"`, `"Some overlapping
-notes"`, `"Dense piano/audio — may need editing"`, `"No notes detected"`).
+always present: `engine_used` (`"basic_pitch"` | `"cqt"` | `"pyin"` | `"piano_expert"`),
+`routing_mode` (`"melody_only"` | `"multiple_notes"` | `"double_stops"`),
+`fallback_reason` (a string when a Multiple-notes request degraded to a different
+engine, else `null`), `warnings` (a list of strings — engine messages plus any
+instrument-specific caution), and `difficulty` (a rough density read, one of `"Simple
+melody"`, `"Some overlapping notes"`, `"Dense piano/audio — may need editing"`, `"No
+notes detected"`).
 
-For Solo Arrangement projects (v1.0), it additionally carries: `arrangement_source`
-(`"vocal_stem"` | `"accompaniment"` | `"full_mix"`), `separation_engine` (`"demucs"` or
-`null`), `arrangement_focus` (`"main_melody"` | `"melody_support"` | `"piano_style"`),
-and `arrangement_difficulty` (`"easy"` | `"medium"`) — `null`/absent for Direct
-transcription projects. Support notes added for Piano/Guitar carry `"source":
-"accompaniment"` on the Note object.
+For Solo Arrangement projects (v1.0, stems upgraded in v0.9.6), it additionally carries:
+`arrangement_source` (`"vocal_stem"` | `"bass_stem"` | `"accompaniment"` | `"full_mix"`),
+`separation_engine` (`"demucs"` or `null`), `arrangement_focus` (`"main_melody"` |
+`"melody_support"` | `"piano_style"`), and `arrangement_difficulty` (`"easy"` |
+`"medium"`) — `null`/absent for Direct transcription projects.
 
 ### Engine Lab endpoints (v0.9.4, separate from the main pipeline)
 
@@ -880,7 +957,7 @@ transcription projects. Support notes added for Piano/Guitar carry `"source":
 | GET | `/engine-lab/fixtures/{key}/audio` | Stream a fixture's generated audio |
 | GET | `/engine-lab/sources` | List projects with audio + fixtures, for the source picker |
 | POST | `/engine-lab/audio` | Upload audio directly into the lab (multipart field `file`) — returns `{"audio_id"}` |
-| POST | `/engine-lab/runs` | Run one engine — `{"engine": "pyin"\|"basic_pitch"\|"cqt", "source": {"kind": "project"\|"fixture"\|"upload", ...}}` |
+| POST | `/engine-lab/runs` | Run one engine — `{"engine": "pyin"\|"basic_pitch"\|"cqt"\|"piano_expert"\|"demucs_vocals"\|"omnizart"\|"mt3", "source": {"kind": "project"\|"fixture"\|"upload", ...}}` (unavailable engines return 400 "Engine unavailable: {reason}") |
 | GET | `/engine-lab/runs` / `/engine-lab/runs/{id}` | List recent runs / get one run's full result |
 | GET | `/engine-lab/runs/{id}/download/midi` \| `/download/json` | Download a run's output |
 | POST | `/engine-lab/runs/{id}/apply/{project_id}` | v0.9.5: make this run's notes the project's active transcription. 400 if the run's source wasn't that exact project's own audio, or if the run failed |

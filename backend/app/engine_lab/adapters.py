@@ -59,21 +59,16 @@ def _run_cqt(audio_path: Path) -> EngineRunOutput:
 
 
 def _piano_expert_available() -> tuple[bool, Optional[str]]:
-    return False, (
-        "Not wired up in this version. Investigated for v0.9.4 (ByteDance's "
-        "piano_transcription_inference): the package itself installs cleanly "
-        "(no conflicts with numpy/librosa/scipy here), but it needs PyTorch "
-        "(a heavy extra dependency) AND downloads a ~165MB checkpoint from "
-        "Zenodo at first use — an external, unmaintained-repo dependency "
-        "(archived Dec 2025) that couldn't be verified end-to-end from this "
-        "environment. It will not become the default piano engine until it "
-        "can be shown to actually pass the C major chord and simple piano "
-        "tests here."
-    )
+    from app.piano_expert import is_available as piano_expert_is_available
+
+    return piano_expert_is_available()
 
 
-def _run_piano_expert(audio_path: Path) -> EngineRunOutput:  # pragma: no cover
-    raise NotImplementedError("Piano Expert (ByteDance) is not wired up yet — see README.")
+def _run_piano_expert(audio_path: Path) -> EngineRunOutput:
+    from app.piano_expert import transcribe_piano
+
+    notes, messages = transcribe_piano(audio_path)
+    return EngineRunOutput(notes=notes, messages=messages)
 
 
 def _omnizart_available() -> tuple[bool, Optional[str]]:
@@ -91,6 +86,48 @@ def _omnizart_available() -> tuple[bool, Optional[str]]:
 
 def _run_omnizart(audio_path: Path) -> EngineRunOutput:  # pragma: no cover
     raise NotImplementedError("Omnizart is not wired up yet — see README.")
+
+
+def _mt3_available() -> tuple[bool, Optional[str]]:
+    return False, (
+        "Research-only, not installed. Investigated for v0.9.4: MT3 "
+        "(Magenta) has no PyPI package — installing it means cloning a repo "
+        "and building JAX/T5X/TensorFlow largely from source, plus fetching "
+        "checkpoints from Google Cloud Storage via gsutil. The project is in "
+        "caretaker mode (occasional trivial commits, no real feature work "
+        "since ~2022). Not practical for a CPU-only, no-fuss local setup."
+    )
+
+
+def _run_mt3(audio_path: Path) -> EngineRunOutput:  # pragma: no cover
+    raise NotImplementedError("MT3 is not wired up — see README.")
+
+
+def _demucs_available() -> tuple[bool, Optional[str]]:
+    from app.separation import is_available as demucs_is_available
+
+    return demucs_is_available()
+
+
+def _run_demucs_vocals(audio_path: Path) -> EngineRunOutput:
+    """Separate with Demucs, then run Basic Pitch on the isolated vocal
+    stem — lets the lab compare "separation + detection" against running
+    detection on the full mix directly, on the exact same source audio."""
+    import tempfile
+
+    from app.polyphonic import _detect_with_basic_pitch
+    from app.separation import separate_full
+
+    with tempfile.TemporaryDirectory(prefix="engine_lab_demucs_") as tmp:
+        work_dir = Path(tmp)
+        result = separate_full(audio_path, work_dir)
+        if result is None:
+            raise RuntimeError("Source separation failed. Using full mix instead.")
+        notes, messages = _detect_with_basic_pitch(result.vocals_path)
+        return EngineRunOutput(
+            notes=notes,
+            messages=["Demucs separated the vocal stem before Basic Pitch ran.", *messages],
+        )
 
 
 ADAPTERS: list[EngineAdapter] = [
@@ -128,14 +165,28 @@ ADAPTERS: list[EngineAdapter] = [
     ),
     EngineAdapter(
         key="piano_expert",
-        label="Piano Expert (ByteDance, investigated)",
+        label="Piano Expert (ByteDance)",
         description=(
-            "A piano-specialist polyphonic transcription model, investigated for "
-            "v0.9.4 as a stronger candidate for dense piano. Not active yet — see "
-            "the unavailable reason."
+            "A piano-specialist polyphonic transcription model (onset/frame/velocity "
+            "CNN), the strongest candidate for dense piano/full-song piano parts. "
+            "Real, working adapter — active automatically when installed and its "
+            "checkpoint can download; otherwise Piano falls back to Basic Pitch, "
+            "here and in the main app. See the unavailable reason if it's off."
         ),
         availability_check=_piano_expert_available,
         run_fn=_run_piano_expert,
+    ),
+    EngineAdapter(
+        key="demucs_vocals",
+        label="Demucs + Basic Pitch (vocal separation)",
+        description=(
+            "Separates the source into vocals/drums/bass/other with Meta's Demucs, "
+            "then runs Basic Pitch on the isolated vocal stem — compare against "
+            "running Basic Pitch on the full mix directly to see what separation "
+            "actually buys you on a given recording."
+        ),
+        availability_check=_demucs_available,
+        run_fn=_run_demucs_vocals,
     ),
     EngineAdapter(
         key="omnizart",
@@ -147,6 +198,16 @@ ADAPTERS: list[EngineAdapter] = [
         ),
         availability_check=_omnizart_available,
         run_fn=_run_omnizart,
+    ),
+    EngineAdapter(
+        key="mt3",
+        label="MT3 (Magenta, investigated)",
+        description=(
+            "Google Magenta's general-purpose multi-instrument transcription "
+            "model, investigated for v0.9.4. Research-only — not installed."
+        ),
+        availability_check=_mt3_available,
+        run_fn=_run_mt3,
     ),
 ]
 

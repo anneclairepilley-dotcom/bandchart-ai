@@ -64,6 +64,7 @@ const ENGINE_LABELS: Record<string, string> = {
   basic_pitch: "Basic Pitch",
   cqt: "Built-in simple detector",
   pyin: "pYIN (melody)",
+  piano_expert: "Piano Expert",
 };
 const ROUTING_MODE_LABELS: Record<string, string> = {
   melody_only: "Melody only",
@@ -73,6 +74,7 @@ const ROUTING_MODE_LABELS: Record<string, string> = {
 // v1.0 Solo Arrangement status labels — mirrors backend/app/arrangement.py.
 const ARRANGEMENT_SOURCE_LABELS: Record<string, string> = {
   vocal_stem: "vocal stem",
+  bass_stem: "bass stem",
   accompaniment: "accompaniment",
   full_mix: "full mix",
 };
