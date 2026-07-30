@@ -2,13 +2,21 @@
 
 AI music arranging and rehearsal app that turns songs into editable lead sheets, solo sheets, band charts and custom arrangements.
 
-## v0.9.3 — Better note detection and real polyphony
+## v0.9.4 — Engine Lab: comparing transcription engines honestly
 
 This is the smallest possible working prototype: a local web app where you upload an audio
 file and the backend runs **real audio-to-pitch transcription**. Everything runs on your own
 computer — no accounts, no payments, no cloud services, no data leaves your machine.
 
-Two detection engines are on board (v0.9.3):
+v0.9.4 adds the **Engine Lab** (`/engine-lab`, linked quietly at the bottom of the home
+page): a separate developer tool for running each transcription engine against the same
+audio and comparing them side by side — engine name, availability, processing time, note
+count, overlapping notes, chord groups, pitch range, warnings, and MIDI/JSON downloads for
+each run, plus a small piano-roll debug view. It's isolated from the main app on purpose:
+nothing it does can affect a real project's transcription. See **Engine Lab** below for
+full details, what was investigated, and how to run the benchmarks.
+
+Two detection engines are selectable in the main app (v0.9.3):
 
 - **Melody (default)**: [librosa](https://librosa.org/)'s pYIN — a genuine, well-established
   pitch-tracking algorithm that follows one melodic line at a time (monophonic: a single
@@ -137,6 +145,104 @@ of complex piano pieces or full-band mixes (polyphonic detection is experimental
 clear, simple material — the best results still come from clear recordings of one
 instrument), strummed guitar chord shapes/diagrams, full guitar/bass extraction from mixed
 songs (tab stays melody-first).
+
+---
+
+## Engine Lab (v0.9.4)
+
+BandChart's note detection is genuinely hard to get right, especially on real piano
+recordings — see "Mrs Magic" below. Rather than keep swapping the main engine and hoping,
+v0.9.4 adds a small, separate **Engine Lab** for comparing engines honestly on the same
+audio, side by side, with real numbers.
+
+**Open it:** click the quiet "Engine Lab" link at the bottom of the home page, or go to
+`/engine-lab` directly. It is a developer tool, not part of the normal workflow — nothing
+it does touches a real project's transcription.
+
+**What it does:**
+1. Choose audio: one of five **built-in synthetic test clips** (A4 tone, C major chord,
+   C major scale, simple block chords, left-hand bass + right-hand melody), an **existing
+   project's audio**, or a **direct upload** just for the lab
+2. Pick one engine and click **Run engine** — the result (processing time, note count,
+   overlapping notes, chord groups, pitch range, any warnings, MIDI/JSON download links,
+   and a small piano-roll debug view) is added to a comparison table, so you can run
+   several engines on the same clip and see them side by side
+3. For the five built-in test clips, every note's correct pitch and timing is known in
+   advance, so the lab also shows a **rough accuracy score**: correct/missed/extra notes,
+   whether simultaneous notes were preserved together, and mean timing error. This is
+   deliberately simple (exact pitch match, generous timing tolerance) — good enough to
+   rank engines on clean audio, not a rigorous benchmark
+4. If an engine isn't installed or available, it's shown grayed out with a clear
+   **"Engine unavailable: [reason]"** message instead of being hidden or crashing
+
+**Engines available in the lab today:**
+
+| Engine | Status | Notes |
+| --- | --- | --- |
+| pYIN (melody baseline) | ✅ Available | The original monophonic engine. Scores 0% on any chord test by design — it can only follow one line, which is exactly the limitation the other engines exist to fix |
+| Basic Pitch (Spotify) | ✅ Available | The app's current main polyphonic engine. Detects chords exactly on clean synthetic audio |
+| Built-in simple detector (CQT) | ✅ Available | The v0.9.2 fallback (no external model). Comparable to Basic Pitch on clean audio, faster, no model download |
+| Piano Expert (ByteDance) | ⛔ Investigated, not active | See below |
+| Omnizart | ⛔ Investigated, not active | See below |
+
+**Sample results** (synthetic fixtures, this environment, CPU):
+
+| Fixture | pYIN | CQT | Basic Pitch |
+| --- | --- | --- | --- |
+| A4 tone | 100% (1 note) | 100% | 100% |
+| C major chord | 0% (1 note, no chord) | 100% (3 notes, 1 group) | 100% (3 notes, 1 group) |
+| C major scale | 100% (8 notes) | 99% (1 extra) | 100% (8 notes) |
+| Block chords (C/F/G) | 0% (1 note) | 100% (9 notes, 3 groups) | 100% (9 notes, 3 groups) |
+| Bass + melody | 56% (misses the bass) | 96% (5 extra) | 96% (6 extra) |
+
+Takeaways: pYIN is honest about being melody-only — it fails hard on anything with two
+notes at once, which is exactly why Basic Pitch exists. CQT and Basic Pitch are neck-and-
+neck on clean, simple material; Basic Pitch is the one kept as the app's default because
+it's a real learned model rather than a hand-tuned spectral heuristic, which tends to
+generalize better to real (non-synthetic) recordings. Both pick up a few extra notes on
+the bass+melody test (low notes have strong harmonics that can be mistaken for extra
+pitches) — a real, honest limitation, not hidden here.
+
+**Engines investigated but not wired into the app (v0.9.4):**
+- **Piano Expert (ByteDance's `piano_transcription_inference`)** — a piano-specialist
+  model that looked like the strongest candidate for dense piano. The Python package
+  itself installs cleanly (no conflicts with this app's numpy/librosa/scipy). BUT it
+  needs PyTorch (a heavy extra dependency) and downloads a ~165MB checkpoint from Zenodo
+  the first time it runs — an external dependency on an **archived (unmaintained)**
+  upstream repo. That checkpoint download could not be verified end-to-end in this
+  environment (network policy blocked Zenodo), so actual transcription quality is
+  **unverified**. Per the rule "don't make it the default until it passes the tests
+  here," it stays off. A future version could add it as a real Piano Expert mode once
+  someone confirms the checkpoint downloads and runs correctly on a real Mac
+- **Omnizart** — a general transcription toolkit (piano/vocal/chord/drum/beat).
+  Genuinely works: installed and ran real transcription on CPU, no GPU needed. But it
+  only runs on **Python 3.10** (this app uses 3.12), needs the system `portaudio`
+  library, and pulls in TensorFlow plus ~700MB of checkpoints (~3.5GB total footprint).
+  That doesn't fit safely inside the main backend environment — it would need its own
+  separate virtual environment and a way to call out to it (a subprocess bridge), which
+  is future work, not done here
+- **MT3 (Magenta)** — investigated via research only (not installed). No PyPI package;
+  installing it means cloning a repo and pulling JAX/T5X/TensorFlow from source, plus
+  fetching checkpoints from Google Cloud Storage via `gsutil`. The project itself is in
+  caretaker mode (occasional trivial commits, no real feature work since ~2022). Not
+  practical for a CPU-only, no-fuss local setup — skipped
+- **"MuScriptor"** — investigated via research only. This turned out to be a real,
+  actively developed model (Kyutai + MireloAI), pip-installable, with a genuinely small
+  CPU-capable variant. **However, its model weights are licensed CC BY-NC 4.0
+  (non-commercial only)** — the code is MIT but the weights are not free to use if
+  BandChart AI is or becomes a paid product. Flagging this for a future decision rather
+  than integrating it under an uncertain license
+- **librosa spectral-peak fallback** — this already exists in the app as the "Built-in
+  simple detector (CQT)" engine (v0.9.2); no new work needed here
+
+**Mrs Magic hard piano benchmark:** a genuinely hard real piano recording
+(`https://youtu.be/yO_OD7Yx2j8`), used as the honest reality check that synthetic test
+clips can't provide. Import it as a normal project (upload or YouTube import), then pick
+it under "An existing project's audio" in the lab. **This could not be run from this
+cloud environment** — YouTube blocks import attempts from cloud servers (same limitation
+as the rest of the app; see "Run locally on Mac for YouTube import" below). Run it on a
+real Mac and compare Basic Pitch against CQT/pYIN there; no engine is expected to solve
+it perfectly — the honest goal is to see how far off each one is.
 
 ---
 
@@ -573,4 +679,20 @@ All endpoints are under `/api`.
 
 Each note in the JSON output has: `pitch` (MIDI number), `pitch_name` (e.g. `"C4"`),
 `start_time` (seconds), `duration` (seconds), and `confidence` (0–1, pYIN's voiced-pitch
-probability for that note, averaged over its frames).
+probability for that note, averaged over its frames). Polyphonic notes may also carry
+`velocity` (0–1), `group` (a shared chord id like `"chord_1"`), `reattack` (a repeated
+melody note the detector split at a genuine re-strike) and `source` (which detector
+produced it: `"basic_pitch"`, `"cqt"` or `"pyin"`).
+
+### Engine Lab endpoints (v0.9.4, separate from the main pipeline)
+
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/engine-lab/engines` | List engines with availability (`{"available": bool, "unavailable_reason": string\|null}`) |
+| GET | `/engine-lab/fixtures` | List the five built-in synthetic test clips |
+| GET | `/engine-lab/fixtures/{key}/audio` | Stream a fixture's generated audio |
+| GET | `/engine-lab/sources` | List projects with audio + fixtures, for the source picker |
+| POST | `/engine-lab/audio` | Upload audio directly into the lab (multipart field `file`) — returns `{"audio_id"}` |
+| POST | `/engine-lab/runs` | Run one engine — `{"engine": "pyin"\|"basic_pitch"\|"cqt", "source": {"kind": "project"\|"fixture"\|"upload", ...}}` |
+| GET | `/engine-lab/runs` / `/engine-lab/runs/{id}` | List recent runs / get one run's full result |
+| GET | `/engine-lab/runs/{id}/download/midi` \| `/download/json` | Download a run's output |

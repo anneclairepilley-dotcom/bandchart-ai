@@ -1,6 +1,6 @@
 # BandChart AI — Project Notes
 
-Living notes for contributors (human or AI). Last updated after v0.9.3 (2026-07).
+Living notes for contributors (human or AI). Last updated after v0.9.4 (2026-07).
 If you are a new Claude Code session: read this file, then README.md, before changing code.
 
 ## Purpose
@@ -220,6 +220,124 @@ Explanations, error messages, and README instructions must stay beginner-friendl
   padding, readable-mode long-note truncation, a Start double-click race, the
   0.0-certainty mask, same-slot keep-later inconsistency, stale YouTube copy, stale
   setupError, and the frontend's hardcoded 2s bars — all fixed and re-verified
+
+### v0.9.4 — Engine Lab: comparing transcription engines honestly (done)
+Owner's core complaint: Mrs Magic (a hard real piano recording) still doesn't transcribe
+well enough, and we'd been swapping engines on hope rather than evidence. v0.9.4 does NOT
+touch the main transcription pipeline at all — it adds a completely separate side area for
+running engines against the same audio and comparing them with real numbers.
+
+**`backend/app/engine_lab/`** (new package, isolated from `app/transcription.py` and
+`app/polyphonic.py` — imports FROM them, never the other way):
+- `base.py` — `EngineAdapter` dataclass (key/label/description/availability_check/run_fn)
+  and `EngineRunOutput` (notes, messages). `is_available()` wraps the check in try/except
+  so a broken import can never crash the `/engines` listing
+- `adapters.py` — `ADAPTERS` registry, 5 entries:
+  - `pyin` → wraps `transcription._detect_notes` directly (bypasses `run_transcription`'s
+    fallback chain — the lab wants to see EACH engine's own raw output, not the app's
+    auto-fallback behavior)
+  - `basic_pitch` → wraps `polyphonic._detect_with_basic_pitch` directly
+  - `cqt` → wraps `polyphonic._detect_with_cqt` directly
+  - `piano_expert` (ByteDance) and `omnizart` — both `is_available()` return
+    `(False, <specific honest reason>)`; `run_fn` raises `NotImplementedError` (never
+    called, since routes.py checks availability before calling run() — see below)
+- `fixtures.py` — 5 synthetic test clips generated deterministically with numpy+soundfile
+  (same percussive-tone technique as prior scratch fixtures: fundamental + quiet octave,
+  exponential decay): `a4_tone`, `c_major_chord` (C4E4G4), `c_major_scale` (8 sequential
+  notes), `block_chords` (C/F/G major triads in sequence), `bass_and_melody` (held C2+G2
+  bass dyad under a 7-note RH melody, genuinely overlapping — a good register-spanning
+  polyphony test). Each carries `expected_notes` (pitch/start/duration) for scoring.
+  Cached to `backend/storage/engine_lab/fixtures/<key>.wav` on first request
+- `scoring.py` — greedy pitch-exact + 0.2s-tolerance matching against expected notes;
+  reports correct/missed/extra, a simultaneity check (did an expected chord cluster's
+  matched detections ALSO cluster together, not just each individually match), mean
+  timing error, and a simple 0-100 rough_score_percent. Deliberately simple per the
+  owner's "don't overcomplicate this"
+- `stats.py` — engine-agnostic comparable stats (note_count, overlapping_notes,
+  chord_groups, pitch_range) computed by RE-clustering start times from scratch (40ms
+  window, same constant as polyphonic.py's GROUP_WINDOW_S) — never trusts a "group" field
+  the engine may or may not have set, so pyin (no groups) and basic_pitch (has groups)
+  are measured identically
+- `storage.py` — `backend/storage/engine_lab/{fixtures,audio,runs}/` — completely
+  separate tree from `backend/storage/projects/`, so a lab run can never touch a real
+  project's transcription.json
+- `routes.py` — `APIRouter(prefix="/api/engine-lab")`, included via
+  `app.include_router()` in main.py. `POST /runs` resolves the source (project audio via
+  `storage.find_existing_audio`, fixture via `fixtures.ensure_fixture_audio`, or a
+  lab-only upload), calls `adapter.run()` inside try/except (a crashing engine becomes a
+  run record with `error` set, never a 500), writes MIDI via the EXISTING
+  `transcription.write_midi_from_notes` (reused, not reimplemented), computes stats +
+  scoring (if the source was a fixture), and persists the full run. `is_available()` is
+  checked BEFORE calling run() so an unavailable engine returns 400 "Engine unavailable:
+  {reason}" instead of ever reaching `_run_piano_expert`'s `NotImplementedError`
+
+**Frontend**: `frontend/app/engine-lab/page.tsx` (new route `/engine-lab`, linked quietly
+at the bottom of `app/page.tsx` — "a developer tool... not part of the normal workflow"),
+`lib/engineLab.ts` (typed fetch helpers, deliberately separate from `lib/api.ts`),
+`components/EngineLabPianoRoll.tsx` (small read-only SVG piano roll, colored by chord
+group, opacity by confidence — NOT a reuse of NotePreview.tsx, which is playhead/seek-
+coupled to Play Along and would've been more work to decouple than to write fresh).
+Runs accumulate client-side (prepended, newest first) into a comparison table; a fresh
+run auto-expands its detail row (piano roll + scoring + messages); clicking a row toggles
+expand/collapse. Source picker: fixture (with audio preview `<audio>` tag) / existing
+project / direct upload, matching "choose an audio file already uploaded/imported" from
+the request plus a lab-only upload path for convenience.
+
+**Investigation findings** (background agents, see README's Engine Lab section for the
+owner-facing summary):
+- **ByteDance `piano_transcription_inference`**: package installs cleanly (no conflicts
+  with this venv's numpy 2.x/librosa/scipy — confirmed in a throwaway venv), but needs
+  PyTorch (a real Linux/no-CDN-cache install here pulled the FULL CUDA 13 stack,
+  ~5.2GB, since only the default PyPI wheel was reachable — a CPU wheel would be much
+  smaller but `download.pytorch.org` was blocked by this sandbox's egress policy) AND
+  auto-downloads a ~165MB checkpoint from Zenodo on first use (`zenodo.org` also
+  blocked here, so the checkpoint fetch failed — `wget` silently wrote a 0-byte file,
+  `PianoTranscription(device='cpu')` then crashed with `EOFError` unpickling it).
+  Upstream repo (`bytedance/piano_transcription`) is archived as of Dec 2025 — no more
+  fixes coming. Could NOT verify actual transcription quality end-to-end here.
+  Registered in `adapters.py` as `piano_expert`, permanently `is_available()=False`
+  with this exact reasoning as the UI's unavailable_reason — NOT wired to run, per
+  "don't make it default until it passes tests here"
+- **Omnizart**: genuinely works — installed cleanly on Python 3.10 (NOT this app's
+  3.12; the container has no 3.8/3.9), needed one system package
+  (`apt-get install portaudio19-dev` for the `pyaudio` build) and hit a
+  `collections.MutableSequence` removal (Python 3.10+) inside `madmom==0.16.1`, which
+  omnizart's own `__init__.py` already monkeypatches around — a real upstream fix, not
+  something BandChart needs to work around itself. Downloaded ~700MB of checkpoints,
+  ran actual piano/chord/drum/vocal transcription via CLI on a synthetic WAV, all
+  succeeded on CPU (20-95s per short clip). Total footprint ~3.5GB. Registered as
+  `omnizart` adapter, permanently unavailable — needs a genuinely separate venv +
+  subprocess bridge to integrate safely, which is future work, not this version
+- **MT3 (Magenta)**: research-only (not installed) — no PyPI package, requires cloning
+  a repo and installing JAX/T5X/TensorFlow largely from source, checkpoints via
+  `gsutil` from GCS. Caretaker-mode maintenance (trivial commits only since ~2022).
+  Skipped, not worth the setup burden for a hobbyist Mac user
+- **"MuScriptor"**: research-only. Surprising find — this is real (Kyutai + MireloAI,
+  mid-2026), pip-installable, CPU-capable small variant, actively maintained. BUT its
+  model weights are **CC BY-NC 4.0 (non-commercial only)** — code is MIT, weights are
+  not free for a product that could become paid. Flagged for the owner, not integrated
+  pending a licensing decision
+
+**Sample cross-engine comparison** (this environment, CPU, run via the lab's own API):
+A4 tone: all three available engines 100%. C major chord: pYIN 0% (1 note, no chord —
+exactly its known limitation), CQT and Basic Pitch both 100% (3 notes, 1 chord group).
+C major scale: pYIN and Basic Pitch 100%, CQT 99% (1 harmonic-driven extra note). Block
+chords (C/F/G): pYIN 0%, CQT and Basic Pitch both 100% (9 notes, 3 groups). Bass+melody
+(the hardest synthetic test — overlapping registers): pYIN 56% (can't hold the bass under
+the melody, monophonic), CQT 96% (5 extra, harmonic-driven), Basic Pitch 96% (6 extra).
+Timing: CQT is fastest (~0.04s), Basic Pitch next (~0.13-0.15s), pYIN slowest (~1-1.6s
+per run — the Viterbi decoder itself, not JIT: numba warmup is a ONE-TIME ~20s cost on
+the very first pyin call in a fresh process, separate from this steady-state number).
+
+**Mrs Magic**: named as the hard real-world benchmark (`youtu.be/yO_OD7Yx2j8`). Could NOT
+be run from this cloud environment — YouTube blocks import attempts from cloud servers,
+same limitation as the rest of the app (see the existing "Run locally on Mac" section).
+Owner needs to import it locally and compare engines in the lab there; do not claim it's
+solved without that real test.
+
+**Chord feature**: still parked under Experimental tools (v0.9.3), untouched this
+version — v0.9.4 was entirely about note detection per the request ("Do not add more
+chord features").
 
 ### v0.9.3 — better note detection and real polyphony (done)
 The whole version went into note detection; weak side features were parked.
@@ -641,15 +759,29 @@ backend/  FastAPI (Python 3.9+; owner's Codespace uses 3.12)
   app/notation_cleanup.py  wobble/merge/fragment/quantize pipeline for clean style
   app/pdf.py            verovio/cairosvg/pypdf PDF engraving (singleton toolkit + lock)
   app/storage.py        storage/projects/<id>/{project.json,audio/,output/}
+  app/engine_lab/        v0.9.4 Engine Lab — isolated from the main pipeline, imports
+                        FROM app/transcription.py + app/polyphonic.py, never vice versa
+    base.py               EngineAdapter/EngineRunOutput types
+    adapters.py            ADAPTERS registry (pyin, basic_pitch, cqt available;
+                          piano_expert/omnizart registered but permanently unavailable)
+    fixtures.py            5 synthetic test clips + known expected notes
+    scoring.py             rough accuracy scoring against expected notes
+    stats.py               engine-agnostic note_count/overlap/chord-group/pitch-range
+    storage.py              storage/engine_lab/{fixtures,audio,runs}/ — separate tree
+    routes.py               APIRouter at /api/engine-lab, included in main.py
 frontend/ Next.js 16 (app router, Tailwind, TypeScript)
-  app/page.tsx                  project list/create
+  app/page.tsx                  project list/create (+ quiet Engine Lab link)
   app/projects/[id]/page.tsx    the whole project workflow UI (memoized NoteTable inside,
                                 note-edit working copy + debounced auto-save)
+  app/engine-lab/page.tsx       v0.9.4 Engine Lab UI — source picker, engine picker,
+                                comparison table, piano-roll debug view
   components/PlayAlong.tsx      Web Audio play-along engine + panel (3 synth voices)
   components/SheetMusic.tsx     OSMD sheet render + blue playhead + bar-wash sync
   components/TabView.tsx        text-tab preview for fretted instruments + highlight
   components/ChordsPanel.tsx    manual chord editor + ChordStrip bar-grid line
+  components/EngineLabPianoRoll.tsx  read-only SVG piano roll for lab run results
   lib/api.ts                    typed fetch helpers; API_BASE_URL defaults to "" (same-origin)
+  lib/engineLab.ts              typed fetch helpers for the Engine Lab (kept separate)
   lib/instruments.ts            instrument keys/labels/offsets (mirror of backend)
   next.config.ts                /api rewrite proxy, 60MB body, 10-min timeout,
                                 allowedDevOrigins for *.app.github.dev

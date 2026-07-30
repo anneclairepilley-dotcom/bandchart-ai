@@ -19,6 +19,7 @@ from app.chords import (
     is_valid_chord_name,
     suggest_chords,
 )
+from app.engine_lab.routes import router as engine_lab_router
 from app.models import (
     ChordsUpdate,
     NotesUpdate,
@@ -42,6 +43,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# v0.9.4: Engine Lab — a side area for comparing transcription engines,
+# isolated from the main /api/projects/* pipeline (see app/engine_lab/).
+app.include_router(engine_lab_router)
 
 ALLOWED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aiff", ".aif"}
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50MB
