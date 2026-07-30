@@ -54,6 +54,12 @@ export interface Note {
   start_time: number;
   duration: number;
   confidence: number;
+  /** Playback loudness 0..1 from the detector (v0.9.3; absent on older notes). */
+  velocity?: number | null;
+  /** Chord-group id shared by simultaneous notes, e.g. "chord_1" (v0.9.3). */
+  group?: string | null;
+  /** True on a repeated note split off at a re-strike (v0.9.3, backend detail). */
+  reattack?: boolean | null;
 }
 
 /** One manual chord symbol on the timeline (e.g. Am starting at 2.0s). */

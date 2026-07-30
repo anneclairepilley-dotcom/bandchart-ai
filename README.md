@@ -2,18 +2,31 @@
 
 AI music arranging and rehearsal app that turns songs into editable lead sheets, solo sheets, band charts and custom arrangements.
 
-## v0.9.2 — Readability, click-to-seek, and experimental multiple notes
+## v0.9.3 — Better note detection and real polyphony
 
 This is the smallest possible working prototype: a local web app where you upload an audio
-file and the backend runs **real audio-to-pitch transcription** using
-[librosa](https://librosa.org/)'s pYIN algorithm. Everything runs on your own computer — no
-accounts, no payments, no cloud services, no data leaves your machine.
+file and the backend runs **real audio-to-pitch transcription**. Everything runs on your own
+computer — no accounts, no payments, no cloud services, no data leaves your machine.
 
-pYIN is a genuine, well-established pitch-tracking algorithm — it follows one melodic line at
-a time (monophonic: a single voice, vocal line, or solo instrument, not full chords). It was
-chosen over deep-learning models like Basic Pitch/TensorFlow because it's pure Python/numpy —
-no TensorFlow — so it installs reliably everywhere, including GitHub Codespaces and other
-environments with newer Python versions.
+Two detection engines are on board (v0.9.3):
+
+- **Melody (default)**: [librosa](https://librosa.org/)'s pYIN — a genuine, well-established
+  pitch-tracking algorithm that follows one melodic line at a time (monophonic: a single
+  voice, vocal line, or solo instrument, not full chords). It's pure Python/numpy — no
+  TensorFlow — so it installs reliably everywhere, including GitHub Codespaces. v0.9.3
+  makes it noticeably better: repeated notes of the same pitch are no longer glued into
+  one long note (a loudness re-attack check finds the re-strikes), and clearly
+  low-confidence detections are dropped (with a message, and never to the point of
+  emptying a quiet recording).
+- **Simple polyphonic / chords (experimental)**: Spotify's open-source
+  [Basic Pitch](https://github.com/spotify/basic-pitch) model (ICASSP 2022) — a real
+  learned transcription model that hears several notes at once. It runs on CPU through its
+  bundled ONNX network (no TensorFlow, no GPU, no accounts, nothing paid — the model ships
+  inside the pip package). Detected notes carry a velocity (loudness) and simultaneous
+  notes share a chord group id like `"chord_1"` in the JSON. If the model isn't installed
+  or fails, the app quietly falls back to the built-in v0.9.2 CQT detector, and if THAT
+  finds nothing usable it falls back to melody-only — always with an honest message, never
+  a crash.
 
 **What it does:**
 - **Clean home screen** (v0.9.1): "Turn sound into sheet music" — upload an audio file
@@ -80,43 +93,50 @@ environments with newer Python versions.
   the nearest note — playback continues from there if playing, stays put if paused, and
   a click while stopped sets where the next Play begins. The note timeline (piano roll),
   the tab columns and the note-table rows are clickable too
-- **Experimental multiple-note detection** (v0.9.2): a new "Note detection" advanced
-  setting — Melody only (default) or **Allow simple chords / multiple notes**
-  (experimental; picked automatically for Piano + Direct transcription). It slices the
-  recording at onsets and reads up to 4 clear simultaneous pitches, so simple piano
-  chords appear as stacked chords on the grand staff, play together in Play Along, and
-  land together in MIDI/JSON/MusicXML/PDF. It is honest about its limits: it works best
-  with clear piano or simple chords, falls back to melody-only with a clear message
-  when it finds nothing usable, and the tab stays melody-first (top note of each chord,
-  with a note saying so). This is NOT full band or complex-piano transcription
+- **Simple polyphonic / chords detection** (v0.9.2, upgraded in v0.9.3): the "Note
+  detection" advanced setting — Melody only (default) or **Simple polyphonic / chords**
+  (experimental; picked automatically for Piano + Direct transcription). v0.9.3 replaces
+  the primary engine with Spotify's **Basic Pitch** model (ONNX, CPU) — real learned
+  polyphonic transcription with up to 4 simultaneous notes kept per moment. Simultaneous
+  notes are grouped into chord events (`"group": "chord_1"` in the JSON, with a
+  per-note velocity), appear as stacked chords on the piano grand staff, play together
+  in Play Along (at their detected loudness), and land together in
+  MIDI/JSON/MusicXML/PDF. A chord-aware rhythm cleanup keeps chords intact while
+  snapping starts and durations to readable values. It is honest about its limits: it
+  works best with clear piano or simple chords, reports when weak notes were removed or
+  a moment was simplified, falls back with a clear message when the model is missing or
+  finds nothing usable, and the tab stays melody-first (top note of each chord, with a
+  note saying so). This is NOT full band or complex-piano transcription
 - **Auto-scroll** (on by default, toggleable): the sheet music, piano roll and note table
   keep the current note in view while playing
-- **Fix wrong notes** (v0.8): the note table is editable — type a new pitch (a note name
-  like G4 or F#3, or a MIDI number), start time or duration into any row and press Enter;
-  **+ Add a note** appends a note you can then adjust; ✕ deletes a wrong note. The
-  preview, playback, sheet music, tab and every download update automatically, and
+- **Fix wrong notes** (v0.8, chord-aware since v0.9.3): the note table is editable —
+  type a new pitch (a note name like G4 or F#3, or a MIDI number), start time or
+  duration into any row and press Enter; **+ Add a note** appends a note you can then
+  adjust; on polyphonic transcriptions the little **+** on each row adds a note
+  starting at the SAME time (so you can build or extend a chord — melody projects
+  keep one note per moment on the engraved sheet, so the row **+** only appears in
+  polyphonic mode); ✕ deletes a single note — including one note out of a chord,
+  leaving the rest. A Chord column shows which notes were detected together.
+  The preview, playback, sheet music, tab and every download update automatically, and
   "Reset to original transcription" undoes all edits. Invalid values get a clear error
   message instead of breaking anything
-- **Chords / lead sheet basics** (v0.9): add your own chord names above the melody —
-  C, Am, F#m7, Bb, G/B and so on — with a beginner-friendly Chords section (add, edit,
-  delete, reset). Chords appear engraved above the staff (the sheet becomes a simple
-  **lead sheet**), in a bar-grid chord line, in the JSON, in the MusicXML/PDF, and in a
-  plain-text **Download Chord Chart**. The **Suggest chords from melody (rough)**
-  button proposes simple diatonic chords as a starting point — smarter in v0.9.1: it
-  follows your chosen key from Advanced settings, adds a V7 (like G7) where the
-  seventh is clearly present, and if the key is genuinely unclear it says so and
-  falls back to C major. This is still NOT automatic chord detection from the
-  recording; the app hears one melody line at a time, and suggestions must always be
-  checked and edited
+- **Chord markers (parked under Experimental tools since v0.9.3)**: the v0.9 manual
+  chord-name tools (add/edit/delete/reset, rough suggestions, chord chart download)
+  still exist, but they were a weak side feature, so they now live collapsed under
+  **Experimental tools** at the bottom of the project page instead of cluttering the
+  main flow. Proper Ultimate Guitar-style chord sheets are a much later feature,
+  probably v5.0
 - **Delete projects**: a Delete button beside each project on the dashboard removes the
   project with its uploaded audio and generated files, after a confirmation prompt
 
 **Explicitly out of scope so far:** accounts, payments, full band charts, rehearsal packs,
-complex editing, stem separation, drums, automatic chord detection from recordings (v0.9's
-chords are manual markers plus rough melody-based suggestions), accurate transcription of
-complex piano pieces or full-band mixes (v0.9.2's multiple-note detection is experimental
-and for clear, simple material), strummed guitar chord shapes/diagrams, full guitar/bass
-extraction from mixed songs (tab stays melody-first).
+complex editing, stem separation, drums, automatic chord detection from recordings (the
+parked chord tools are manual markers plus rough melody-based suggestions; Ultimate
+Guitar-style chord sheets are a much later feature, probably v5.0), accurate transcription
+of complex piano pieces or full-band mixes (polyphonic detection is experimental and for
+clear, simple material — the best results still come from clear recordings of one
+instrument), strummed guitar chord shapes/diagrams, full guitar/bass extraction from mixed
+songs (tab stays melody-first).
 
 ---
 
@@ -200,8 +220,14 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
 pip install -r requirements.txt
+pip install --no-deps basic-pitch
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
+(The `--no-deps` line installs the Basic Pitch note-detection model used by polyphonic
+mode. `--no-deps` is deliberate: the package declares an old TensorFlow it doesn't
+actually need here — the model runs through onnxruntime, which is already in
+requirements.txt. If you skip this line the app still works; polyphonic mode just uses
+the built-in simpler detector.)
 Leave this running. Codespaces will pop up a notification offering to open port 8000 — you
 can ignore/dismiss it. The app talks to the backend through the frontend's own server, so
 port 8000 never needs to be opened or made public.
@@ -243,6 +269,7 @@ cd backend
 python3 -m venv .venv
 source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+pip install --no-deps basic-pitch   # optional: the polyphonic-mode model (see note above)
 uvicorn app.main:app --reload --port 8000
 ```
 
@@ -275,9 +302,10 @@ else.
    `.musicxml` and `.pdf` files
 
 > **Updating from an older version?** After `git pull`, run
-> `pip install -r requirements.txt` in the backend once more (with the virtual environment
-> active) — newer versions add libraries (music21 for MusicXML, verovio/cairosvg/pypdf for
-> PDF export).
+> `pip install -r requirements.txt` and `pip install --no-deps basic-pitch` in the backend
+> once more (with the virtual environment active) — newer versions add libraries (music21
+> for MusicXML, verovio/cairosvg/pypdf for PDF export, onnxruntime + Basic Pitch for
+> v0.9.3's polyphonic detection).
 
 ### Trying the PDF export and cleanup (beginner steps)
 
@@ -346,29 +374,31 @@ the **Download TAB** button appear. Switch to **Bass** — expect the yellow oct
 note on most melodies. Switch to **Ukulele**, then back to **Piano** — the sheet music
 view returns. Delete a note in the note table and watch the tab column disappear.
 
-### Chords and lead sheets (beginner steps)
+### Chord markers — parked under Experimental tools (beginner steps)
 
-v0.9 adds a simple, honest chord layer. You place the chord names yourself (or start
-from rough suggestions) — the app does **not** detect chords from the recording.
+The v0.9 chord layer was a weak side feature, so since v0.9.3 it lives collapsed under
+**Experimental tools (chord markers)** at the bottom of the project page. Proper
+Ultimate Guitar-style chord sheets are a much later feature, probably v5.0. You place
+the chord names yourself (or start from rough suggestions) — the app does **not**
+detect chords from the recording.
 
-1. Open a transcribed project and find the **Chords** section (under Play Along)
+1. Open a transcribed project, scroll to the bottom, and click
+   **Experimental tools (chord markers)** to unfold the section
 2. Click **+ Add chord** — a chord row appears with a name box and a start time in
-   seconds (the matching bar number is shown next to it; one bar is 2 seconds at the
-   app's fixed 120 bpm, 4/4)
+   seconds (the matching bar number is shown next to it)
 3. Type any normal chord name — C, Am, F#m7, Bb, G7, Cmaj7, G/B — and press Enter.
    Typos like "H9" get a clear red message and change nothing
-4. The sheet music heading flips to **Lead sheet (melody + chords)**: chord names appear
-   engraved above the staff, and a bar-grid chord line (like `| C | G | Am F |`) shows
-   above the sheet — and above the TAB for guitar/bass/ukulele
+4. Chord names still appear engraved above the staff in the MusicXML and PDF downloads
+   (transposed for E♭/B♭ instruments), and the JSON download includes the markers
 5. **Download Chord Chart** saves a plain text file with the bar grid and every chord
-   with its time and bar number. The MusicXML and PDF downloads carry the chord symbols
-   too (transposed for E♭/B♭ instruments), and the JSON download includes the markers
+   with its time and bar number
 6. **Suggest chords from melody (rough)** fills the list with simple in-key guesses from
    the detected melody. They are a rough starting point — please check and edit them
 7. Chords stay put when you edit, add or delete melody notes; **Reset chords** clears
    the list. A chord placed after the end of the melody gets a friendly warning
-8. Limitations: one chord layer, no strummed guitar shapes/diagrams yet, and no chord
-   detection from full-band recordings — that is a later version
+8. Limitations: one chord layer, no strummed guitar shapes/diagrams, no chord detection
+   from full-band recordings, and the chord names no longer show on the in-browser
+   sheet strip — chord sheets return properly in a much later version (probably v5.0)
 
 ### Fixing wrong notes (beginner steps)
 
@@ -380,8 +410,13 @@ Since v0.8 you can **edit** notes, not just delete them.
    or `Bb3`, or a MIDI number — and press Enter (or click away)
 3. **Fix the timing**: the start time and duration boxes work the same way (seconds)
 4. **Add a missing note**: click **+ Add a note** under the table — a new note appears
-   after the last one; then type in the pitch and timing you want
-5. Still wrong? Click the red **✕** at the end of a row to delete that note entirely
+   after the last one; then type in the pitch and timing you want. On polyphonic
+   transcriptions you can also **stack a chord** (v0.9.3): click the little blue **+**
+   on a row — it adds a note starting at the SAME time as that row (a third above),
+   ready to adjust
+5. Still wrong? Click the red **✕** at the end of a row to delete that note entirely —
+   including a single note out of a detected chord (the Chord column shows which notes
+   belong together); the other chord notes stay
 6. Every change auto-saves (an "Edits saved" note confirms it) and updates the preview,
    the sheet music, the tab, playback and all downloads — there is nothing extra to
    regenerate

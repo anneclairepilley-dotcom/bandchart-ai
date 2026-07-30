@@ -82,10 +82,14 @@ def smooth_pitch_wobble(notes: list[Note], settings: CleanupSettings) -> list[No
 
 
 def merge_same_pitch(notes: list[Note], settings: CleanupSettings) -> list[Note]:
-    """Fuse consecutive same-pitch notes separated by no more than merge_gap_s."""
+    """Fuse consecutive same-pitch notes separated by no more than merge_gap_s.
+
+    Notes flagged "reattack" (v0.9.3: a repeated note the detector split off
+    at a genuine re-strike) are never fused back onto their predecessor.
+    """
     merged: list[Note] = []
     for note in notes:
-        if merged:
+        if merged and not note.get("reattack"):
             last = merged[-1]
             gap = note["start_time"] - (last["start_time"] + last["duration"])
             if note["pitch"] == last["pitch"] and gap <= settings.merge_gap_s:
@@ -98,9 +102,12 @@ def merge_same_pitch(notes: list[Note], settings: CleanupSettings) -> list[Note]
                     last["confidence"] * last["duration"]
                     + note["confidence"] * note["duration"]
                 ) / max(total, 1e-9)
-                merged[-1] = _make_note(
+                fused = _make_note(
                     last["pitch"], last["start_time"], new_end - last["start_time"], confidence
                 )
+                if last.get("reattack"):
+                    fused["reattack"] = True
+                merged[-1] = fused
                 continue
         merged.append(dict(note))
     return merged
@@ -118,16 +125,24 @@ def quantize(notes: list[Note], settings: CleanupSettings) -> list[Note]:
     for note in notes:
         start = round(note["start_time"] / grid) * grid
         duration = max(grid, round(note["duration"] / grid) * grid)
-        quantized.append(_make_note(note["pitch"], start, duration, note["confidence"]))
+        snapped = _make_note(note["pitch"], start, duration, note["confidence"])
+        if note.get("reattack"):
+            snapped["reattack"] = True
+        quantized.append(snapped)
 
     # Snapping can create overlaps or make same-pitch notes touch: merge
-    # touching same-pitch notes, clip anything else that overlaps.
+    # touching same-pitch notes (but never across a re-strike boundary —
+    # a repeated note must stay two notes), clip anything else that overlaps.
     cleaned: list[Note] = []
     for note in quantized:
         if cleaned:
             last = cleaned[-1]
             last_end = last["start_time"] + last["duration"]
-            if note["pitch"] == last["pitch"] and note["start_time"] <= last_end:
+            if (
+                note["pitch"] == last["pitch"]
+                and note["start_time"] <= last_end
+                and not note.get("reattack")
+            ):
                 new_end = max(last_end, note["start_time"] + note["duration"])
                 cleaned[-1] = _make_note(
                     last["pitch"],
@@ -141,9 +156,12 @@ def quantize(notes: list[Note], settings: CleanupSettings) -> list[Note]:
                 if clipped < grid:
                     # Same grid slot as the previous note; keep the earlier one.
                     continue
-                cleaned[-1] = _make_note(
+                shortened = _make_note(
                     last["pitch"], last["start_time"], clipped, last["confidence"]
                 )
+                if last.get("reattack"):
+                    shortened["reattack"] = True
+                cleaned[-1] = shortened
         cleaned.append(note)
     return cleaned
 
@@ -230,6 +248,78 @@ def make_readable(
                 note["pitch"], start_ql * spq, duration_ql * spq, note["confidence"]
             )
         )
+    return result
+
+
+def clean_notes_poly(
+    notes: list[Note],
+    settings: CleanupSettings | None = None,
+    readable: bool = True,
+    max_polyphony: int = 4,
+) -> list[Note]:
+    """Rhythm cleanup for polyphonic transcriptions (v0.9.3).
+
+    The mono pipeline (wobble smoothing, same-pitch merging, gap
+    absorption) would eat chord members, so poly gets its own pass:
+    - starts snap to the eighth grid; notes landing in the same slot form
+      one chord event
+    - duplicate pitches within an event merge (longest ring wins)
+    - an event keeps at most max_polyphony pitches (strongest confidence)
+    - durations snap to readable lengths (readable=True) or stay on the
+      literal grid (Precise mode), and are clipped so no event rings past
+      the next one
+    - chord group ids are reassigned per event so exports stay in sync
+    """
+    settings = settings or CleanupSettings()
+    spq = settings.seconds_per_quarter
+    grid_ql = settings.grid_quarters
+    longest_simple = READABLE_DURATIONS_QL[-1]
+
+    # slot -> pitch -> (duration_ql, source note)
+    events: dict[float, dict[int, tuple[float, Note]]] = {}
+    for n in notes:
+        start_ql = round((n["start_time"] / spq) / grid_ql) * grid_ql
+        dur_ql = max(grid_ql, round((n["duration"] / spq) / grid_ql) * grid_ql)
+        slot = events.setdefault(start_ql, {})
+        pitch = int(n["pitch"])
+        prev = slot.get(pitch)
+        if (
+            prev is None
+            or dur_ql > prev[0]
+            or (dur_ql == prev[0] and n["confidence"] > prev[1]["confidence"])
+        ):
+            slot[pitch] = (dur_ql, n)
+
+    offsets = sorted(events)
+    result: list[Note] = []
+    group_id = 0
+    for index, start_ql in enumerate(offsets):
+        members = sorted(events[start_ql].items())  # by pitch
+        if len(members) > max_polyphony:
+            members.sort(key=lambda kv: -kv[1][1]["confidence"])
+            members = members[:max_polyphony]
+            members.sort(key=lambda kv: kv[0])
+        room = offsets[index + 1] - start_ql if index + 1 < len(offsets) else None
+        group_label = None
+        if len(members) > 1:
+            group_id += 1
+            group_label = f"chord_{group_id}"
+        for pitch, (dur_ql, source) in members:
+            if readable and dur_ql <= longest_simple:
+                snapped = min(READABLE_DURATIONS_QL, key=lambda v: abs(v - dur_ql))
+            else:
+                # Longer than a semibreve (or Precise mode): keep the
+                # grid-rounded length and let the engraver tie it.
+                snapped = dur_ql
+            if room is not None:
+                snapped = min(snapped, room)
+            snapped = max(grid_ql, snapped)
+            cleaned = _make_note(pitch, start_ql * spq, snapped * spq, source["confidence"])
+            if source.get("velocity") is not None:
+                cleaned["velocity"] = source["velocity"]
+            if group_label:
+                cleaned["group"] = group_label
+            result.append(cleaned)
     return result
 
 

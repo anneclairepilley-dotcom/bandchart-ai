@@ -156,9 +156,12 @@ export default function PlayAlong({
    * automatically when the Sound selector is on Auto.
    */
   const scheduleNoteSound = useCallback(
-    (freq: number, when: number, wallDuration: number) => {
+    (freq: number, when: number, wallDuration: number, velocity = 1) => {
       const ctx = ctxRef.current;
       if (!ctx) return;
+      // v0.9.3: detected loudness scales the note (floored so quiet chord
+      // members stay audible).
+      const NOTE_PEAK = NOTE_GAIN * Math.max(0.35, Math.min(1, velocity));
       const patch = patchRef.current;
       const gain = ctx.createGain();
       const filter = ctx.createBiquadFilter();
@@ -188,9 +191,9 @@ export default function PlayAlong({
         addOsc("triangle", freq, 1);
         addOsc("sine", freq * 2, 0.3);
         g.setValueAtTime(0, when);
-        g.linearRampToValueAtTime(NOTE_GAIN, when + 0.01);
+        g.linearRampToValueAtTime(NOTE_PEAK, when + 0.01);
         g.exponentialRampToValueAtTime(
-          Math.max(0.02, NOTE_GAIN * 0.3),
+          Math.max(0.02, NOTE_PEAK * 0.3),
           Math.max(when + 0.02, end - 0.05)
         );
         g.linearRampToValueAtTime(0, end);
@@ -206,8 +209,8 @@ export default function PlayAlong({
         const attack = Math.min(0.08, wallDuration / 3);
         const release = Math.min(0.1, wallDuration / 3);
         g.setValueAtTime(0, when);
-        g.linearRampToValueAtTime(NOTE_GAIN, when + attack);
-        g.setValueAtTime(NOTE_GAIN, end - release);
+        g.linearRampToValueAtTime(NOTE_PEAK, when + attack);
+        g.setValueAtTime(NOTE_PEAK, end - release);
         g.linearRampToValueAtTime(0, end);
       } else if (patch === "guitar") {
         // Warm pluck: rounder filter, longer singing decay than raw pluck.
@@ -216,7 +219,7 @@ export default function PlayAlong({
         addOsc("sine", freq * 2, 0.25);
         const decay = Math.min(1.1, Math.max(0.35, wallDuration + 0.25));
         g.setValueAtTime(0, when);
-        g.linearRampToValueAtTime(NOTE_GAIN, when + 0.008);
+        g.linearRampToValueAtTime(NOTE_PEAK, when + 0.008);
         g.exponentialRampToValueAtTime(0.012, when + decay);
         g.linearRampToValueAtTime(0, end);
       } else if (patch === "bass") {
@@ -226,9 +229,9 @@ export default function PlayAlong({
         addOsc("triangle", freq, 0.35);
         addOsc("sine", freq * 2, 0.15);
         g.setValueAtTime(0, when);
-        g.linearRampToValueAtTime(NOTE_GAIN * 1.15, when + 0.012);
+        g.linearRampToValueAtTime(NOTE_PEAK * 1.15, when + 0.012);
         g.exponentialRampToValueAtTime(
-          Math.max(0.02, NOTE_GAIN * 0.35),
+          Math.max(0.02, NOTE_PEAK * 0.35),
           Math.max(when + 0.03, end - 0.06)
         );
         g.linearRampToValueAtTime(0, end);
@@ -239,7 +242,7 @@ export default function PlayAlong({
         addOsc("sine", freq * 2, 0.2);
         const decay = Math.min(0.5, Math.max(0.16, wallDuration * 0.7));
         g.setValueAtTime(0, when);
-        g.linearRampToValueAtTime(NOTE_GAIN, when + 0.005);
+        g.linearRampToValueAtTime(NOTE_PEAK, when + 0.005);
         g.exponentialRampToValueAtTime(0.01, when + decay);
         g.linearRampToValueAtTime(0, end);
       } else {
@@ -248,7 +251,7 @@ export default function PlayAlong({
         addOsc("triangle", freq, 1);
         const decay = Math.min(0.8, Math.max(0.15, wallDuration));
         g.setValueAtTime(0, when);
-        g.linearRampToValueAtTime(NOTE_GAIN, when + 0.005);
+        g.linearRampToValueAtTime(NOTE_PEAK, when + 0.005);
         g.exponentialRampToValueAtTime(0.008, when + decay);
         g.linearRampToValueAtTime(0, end);
       }
@@ -313,7 +316,8 @@ export default function PlayAlong({
         scheduleNoteSound(
           midiToFreq(note.pitch),
           Math.max(when, ctx.currentTime),
-          note.duration / rateRef.current
+          note.duration / rateRef.current,
+          note.velocity ?? 1
         );
         pointerRef.current += 1;
       }
@@ -352,22 +356,25 @@ export default function PlayAlong({
       // First note fully at/after the start position…
       pointerRef.current = notes.findIndex((n) => n.start_time >= startPos);
       if (pointerRef.current === -1) pointerRef.current = notes.length;
-      // …plus the remainder of a note already sounding at that position.
-      const partial = noteIndexAt(startPos);
-      if (partial !== null && notes[partial].start_time < startPos) {
-        const n = notes[partial];
+      // …plus the remainder of EVERY note already sounding at that position
+      // (v0.9.3: with chords, several notes can be mid-ring at once).
+      for (const n of notes) {
+        if (n.start_time >= startPos) break;
         const remaining = n.start_time + n.duration - startPos;
-        scheduleNoteSound(
-          midiToFreq(n.pitch),
-          anchorCtxTimeRef.current,
-          remaining / newRate
-        );
+        if (remaining > 0.01) {
+          scheduleNoteSound(
+            midiToFreq(n.pitch),
+            anchorCtxTimeRef.current,
+            remaining / newRate,
+            n.velocity ?? 1
+          );
+        }
       }
 
       stopLoop();
       rafRef.current = requestAnimationFrame(tick);
     },
-    [notes, scheduleClick, scheduleNoteSound, noteIndexAt, tick, stopLoop]
+    [notes, scheduleClick, scheduleNoteSound, tick, stopLoop]
   );
 
   const handlePlayPause = useCallback(() => {

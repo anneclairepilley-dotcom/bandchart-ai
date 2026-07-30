@@ -33,16 +33,18 @@ import PlayAlong from "@/components/PlayAlong";
 import SheetMusic from "@/components/SheetMusic";
 import TabView from "@/components/TabView";
 import ChordsPanel, {
-  ChordStrip,
   isValidChordName,
   MAX_CHORD_NAME_LEN,
 } from "@/components/ChordsPanel";
 import type { Note } from "@/lib/api";
 
-/** Keep the working notes ordered by start time — playback scheduling, the
- * current-note highlight and the backend all assume this order. */
+/** Keep the working notes ordered by start time (then pitch, matching the
+ * backend) — playback scheduling, the current-note highlight and the
+ * backend all assume this order. */
 function sortNotes(notes: Note[]): Note[] {
-  return [...notes].sort((a, b) => a.start_time - b.start_time);
+  return [...notes].sort(
+    (a, b) => a.start_time - b.start_time || a.pitch - b.pitch
+  );
 }
 
 const PITCH_CLASSES: Record<string, number> = {
@@ -81,6 +83,8 @@ const NoteTable = memo(function NoteTable({
   onDelete,
   onEdit,
   onSeekNote,
+  onAddAt,
+  showAddAt,
 }: {
   notes: Note[];
   writtenLabel: string;
@@ -95,6 +99,12 @@ const NoteTable = memo(function NoteTable({
   ) => void;
   /** Row click (not on an input/button) moves the playhead to that note. */
   onSeekNote: (index: number) => void;
+  /** "+" button: add a new note starting at the same time as this row. */
+  onAddAt: (index: number) => void;
+  /** Only polyphonic transcriptions show the per-row "+" — on melody
+   * projects the engraved sheet keeps one note per moment, so a stacked
+   * note would silently vanish from the MusicXML/PDF. */
+  showAddAt: boolean;
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
 
@@ -126,8 +136,9 @@ const NoteTable = memo(function NoteTable({
             <th className="p-2 font-medium">Start (s)</th>
             <th className="p-2 font-medium">Duration (s)</th>
             <th className="p-2 font-medium">Confidence</th>
+            <th className="p-2 font-medium">Chord</th>
             <th className="p-2 font-medium">
-              <span className="sr-only">Delete</span>
+              <span className="sr-only">Actions</span>
             </th>
           </tr>
         </thead>
@@ -195,7 +206,19 @@ const NoteTable = memo(function NoteTable({
                 />
               </td>
               <td className="p-2">{(note.confidence * 100).toFixed(0)}%</td>
-              <td className="p-2 text-right">
+              <td className="p-2 text-xs text-gray-500">{note.group ?? ""}</td>
+              <td className="p-2 text-right whitespace-nowrap">
+                {showAddAt && (
+                  <button
+                    type="button"
+                    onClick={() => onAddAt(i)}
+                    title={`Add a note starting at ${note.start_time.toFixed(2)}s (stack a chord)`}
+                    data-testid={`add-note-at-${i}`}
+                    className="rounded px-2 py-0.5 text-xs text-blue-700 hover:bg-blue-50"
+                  >
+                    +
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => onDelete(i)}
@@ -475,6 +498,30 @@ export default function ProjectDetailPage() {
         confidence: 1,
       };
       return sortNotes([...list, newNote]);
+    });
+  }, []);
+
+  // v0.9.3: "+" on a row stacks a new note at the SAME start time (a third
+  // above), so chords can be built or extended right in the editor.
+  const handleAddNoteAt = useCallback((index: number) => {
+    setEditError(null);
+    pendingSaveRef.current = true;
+    setSaveState("saving");
+    setWorkingNotes((current) => {
+      if (!current || !current[index]) return current;
+      const source = current[index];
+      const pitch = Math.min(127, source.pitch + 4);
+      const newNote: Note = {
+        pitch,
+        pitch_name: midiNoteName(pitch),
+        start_time: source.start_time,
+        duration: source.duration,
+        confidence: 1,
+        ...(source.group ? { group: source.group } : {}),
+        // Match the source's loudness so the new note blends into the chord.
+        ...(source.velocity != null ? { velocity: source.velocity } : {}),
+      };
+      return sortNotes([...current, newNote]);
     });
   }, []);
 
@@ -1131,10 +1178,10 @@ export default function ProjectDetailPage() {
             and use Upload audio file instead.
           </p>
           <p className="text-xs text-gray-600">
-            YouTube import uses the same monophonic transcription engine. It
-            works best on clear single melody lines, not full band mixes.
-            Videos longer than 10 minutes are rejected for now — short clips
-            work best.
+            YouTube import uses the same transcription engine as uploads. It
+            works best on clear single melody lines or simple piano chords,
+            not full band mixes. Videos longer than 10 minutes are rejected
+            for now — short clips work best.
           </p>
         </div>
       )}
@@ -1398,11 +1445,11 @@ export default function ProjectDetailPage() {
                       }}
                       data-testid="detection-poly"
                     />
-                    Allow simple chords / multiple notes (experimental)
+                    Simple polyphonic / chords (experimental)
                   </label>
                 </div>
                 <p className="mt-1 text-xs text-gray-600">
-                  Multiple-note detection is experimental and works best with
+                  Polyphonic detection is experimental and works best with
                   clear piano or simple chords. Piano + Direct transcription
                   turns it on automatically.
                 </p>
@@ -1506,7 +1553,7 @@ export default function ProjectDetailPage() {
                 className="mt-2 rounded border border-blue-200 bg-blue-50 p-2 text-xs text-blue-900"
                 data-testid="poly-note"
               >
-                Multiple-note detection is experimental and works best with
+                Polyphonic detection is experimental and works best with
                 clear piano or simple chords.
               </p>
             )}
@@ -1676,35 +1723,9 @@ export default function ProjectDetailPage() {
                 onAutoScrollChange={setAutoScroll}
               />
 
-              <ChordsPanel
-                projectId={projectId}
-                chords={chords ?? []}
-                melodyEnd={melodyEnd}
-                secondsPerBar={secondsPerBar}
-                timeSignature={projectTimeSignature}
-                saveState={chordSaveState}
-                errorMessage={chordsError}
-                suggestBusy={suggestBusy}
-                suggestNote={suggestNote}
-                onEditChord={handleEditChord}
-                onAddChord={handleAddChord}
-                onDeleteChord={handleDeleteChord}
-                onResetChords={handleResetChords}
-                onSuggestChords={handleSuggestChords}
-              />
-
               {selectedInstrument.fretted ? (
                 <div>
                   <h2 className="mb-2 text-lg font-medium">Tab output</h2>
-                  {chords && chords.length > 0 && (
-                    <>
-                      <ChordStrip chords={chords} melodyEnd={melodyEnd} secondsPerBar={secondsPerBar} />
-                      <p className="mb-2 text-xs text-gray-600">
-                        Chords are shown as names only for now — no strummed
-                        chord shapes on the tab yet.
-                      </p>
-                    </>
-                  )}
                   <TabView
                     projectId={projectId}
                     instrumentKey={instrumentKey}
@@ -1716,21 +1737,7 @@ export default function ProjectDetailPage() {
                 </div>
               ) : (
                 <div>
-                  <h2 className="mb-2 text-lg font-medium">
-                    {chords && chords.length > 0
-                      ? "Lead sheet (melody + chords)"
-                      : "Sheet music"}
-                  </h2>
-                  {chords && chords.length > 0 && (
-                    <>
-                      <p className="mb-1 text-xs text-gray-600" data-testid="leadsheet-info">
-                        Lead sheet — {selectedInstrument.label}, 120 bpm,{" "}
-                        {projectTimeSignature}. Chord names appear above the
-                        staff and in the bar line below.
-                      </p>
-                      <ChordStrip chords={chords} melodyEnd={melodyEnd} secondsPerBar={secondsPerBar} />
-                    </>
-                  )}
+                  <h2 className="mb-2 text-lg font-medium">Sheet music</h2>
                   <SheetMusic
                     projectId={projectId}
                     instrumentKey={instrumentKey}
@@ -1754,6 +1761,40 @@ export default function ProjectDetailPage() {
                     currentNoteIndex={playNoteIndex}
                     autoScroll={autoScroll}
                     onSeek={handleSeek}
+                  />
+                </div>
+              </details>
+
+              {/* v0.9.3: the rough chord tools are parked here, out of the
+                  main flow, while the version focus is note detection. */}
+              <details
+                className="rounded border border-gray-300 p-3"
+                data-testid="experimental-tools"
+              >
+                <summary className="cursor-pointer text-sm font-medium text-gray-700">
+                  Experimental tools (chord markers)
+                </summary>
+                <div className="mt-3 space-y-3">
+                  <p className="text-xs text-gray-600">
+                    These chord tools are an early experiment and stay hidden
+                    here for now. Proper Ultimate Guitar-style chord sheets
+                    are a much later feature, probably v5.0.
+                  </p>
+                  <ChordsPanel
+                    projectId={projectId}
+                    chords={chords ?? []}
+                    melodyEnd={melodyEnd}
+                    secondsPerBar={secondsPerBar}
+                    timeSignature={projectTimeSignature}
+                    saveState={chordSaveState}
+                    errorMessage={chordsError}
+                    suggestBusy={suggestBusy}
+                    suggestNote={suggestNote}
+                    onEditChord={handleEditChord}
+                    onAddChord={handleAddChord}
+                    onDeleteChord={handleDeleteChord}
+                    onResetChords={handleResetChords}
+                    onSuggestChords={handleSuggestChords}
                   />
                 </div>
               </details>
@@ -1802,6 +1843,8 @@ export default function ProjectDetailPage() {
                   onDelete={handleDeleteNote}
                   onEdit={handleEditNote}
                   onSeekNote={handleSeekNote}
+                  onAddAt={handleAddNoteAt}
+                  showAddAt={notes.detection === "poly"}
                 />
                 <div className="mt-2 flex flex-wrap items-start justify-between gap-2">
                   <p className="text-xs text-gray-600">
