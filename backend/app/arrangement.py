@@ -22,10 +22,16 @@ Pipeline:
    (v0.9.6: Piano tries the Piano Expert specialist engine first, when
    available, before Basic Pitch).
 4. For piano and guitar only, when the arrangement focus calls for it,
-   pull a small number of sparse low-register notes from the accompaniment
-   stem as simple support — never a dense reduction of everything detected.
-5. Merge, and report exactly what happened (source, engines, warnings) so
-   the result is honest about being an arrangement, not magic.
+   pull a number of sparse low-register support notes from the
+   accompaniment stem — how many, driven by arrangement_density
+   (Simple/Balanced/Detailed, v0.9.8) — never a dense reduction of
+   everything detected.
+5. v0.9.8: "Fit to instrument range" — octave-shift notes (by phrase, see
+   app/range_fit.py) so everything actually fits the chosen instrument's
+   playable range (app/instrument_profiles.py).
+6. Merge, and report exactly what happened (source, engines, density,
+   range fitting, warnings) so the result is honest about being an
+   arrangement, not magic.
 """
 
 from __future__ import annotations
@@ -38,7 +44,9 @@ from typing import Any, Optional
 import librosa
 import soundfile as sf
 
+from app.instrument_profiles import get_profile
 from app.polyphonic import MAX_POLYPHONY, _assign_groups, detect_notes_poly
+from app.range_fit import fit_notes_to_range
 from app.routing import RoutingPlan, describe_difficulty, resolve_routing, specialist_engine_for
 from app.separation import separate_full
 from app.storage import now_iso
@@ -61,10 +69,12 @@ SUPPORT_CAPABLE_INSTRUMENTS = {"piano", "guitar"}
 # never duplicate, the melody.
 SUPPORT_MAX_PITCH = 60  # middle C
 # How many separate support notes to keep, and the minimum spacing between
-# them, by difficulty — kept deliberately small so the result reads as a
-# simple bassline/left hand, not a dense reduction of everything detected.
-SUPPORT_NOTE_BUDGET = {"easy": 24, "medium": 48}
-SUPPORT_MIN_GAP_S = {"easy": 0.6, "medium": 0.3}
+# them, by density (v0.9.8: Simple/Balanced/Detailed replaces the old
+# Easy/Medium) — kept deliberately small even at "Detailed" so the result
+# reads as a simple bassline/left hand, never a dump of everything
+# detected. Simple is now much sparser than the old "Easy" was.
+SUPPORT_NOTE_BUDGET = {"simple": 6, "balanced": 20, "detailed": 40}
+SUPPORT_MIN_GAP_S = {"simple": 1.2, "balanced": 0.6, "detailed": 0.3}
 # Generous cap for grouping the merged melody+support notes into chord ids
 # for display/density purposes only — melody and support notes rarely land
 # within the clustering window of each other, so this is not expected to
@@ -164,13 +174,13 @@ def _detect_melody(
 
 
 def _extract_support_notes(
-    accompaniment_path: Path, difficulty: str
+    accompaniment_path: Path, density: str
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """A small number of sparse, low-register notes to sit under the melody.
 
     Never dumps everything detected: thins to a fixed note budget with a
-    minimum gap between kept notes, both driven by difficulty, so the
-    result reads as a simple bassline/left hand rather than a wash of notes.
+    minimum gap between kept notes, both driven by density, so the result
+    reads as a simple bassline/left hand rather than a wash of notes.
     """
     notes, messages = detect_notes_poly(accompaniment_path, max_polyphony=MAX_POLYPHONY)
     low_notes = sorted(
@@ -178,8 +188,8 @@ def _extract_support_notes(
         key=lambda n: n["start_time"],
     )
 
-    min_gap = SUPPORT_MIN_GAP_S.get(difficulty, SUPPORT_MIN_GAP_S["easy"])
-    budget = SUPPORT_NOTE_BUDGET.get(difficulty, SUPPORT_NOTE_BUDGET["easy"])
+    min_gap = SUPPORT_MIN_GAP_S.get(density, SUPPORT_MIN_GAP_S["simple"])
+    budget = SUPPORT_NOTE_BUDGET.get(density, SUPPORT_NOTE_BUDGET["simple"])
 
     thinned: list[dict[str, Any]] = []
     last_kept_start = -min_gap
@@ -208,15 +218,15 @@ def run_solo_arrangement(
     instrument: str = "concert",
     note_detection: str = "melody",
     arrangement_focus: str = "main_melody",
-    arrangement_difficulty: str = "easy",
+    arrangement_density: str = "simple",
 ) -> dict[str, Any]:
     """Run the Solo Arrangement pipeline on audio_path, write MIDI + notes JSON.
 
     Returns the same result shape as run_transcription, plus arrangement_source
     ("vocal_stem" | "bass_stem" | "accompaniment" | "full_mix"),
-    separation_engine ("demucs" or None), arrangement_focus and
-    arrangement_difficulty — so the UI can show exactly what happened, never
-    hidden.
+    separation_engine ("demucs" or None), arrangement_focus,
+    arrangement_density and range_fitting ("none" | "octave_shifted" |
+    "simplified") — so the UI can show exactly what happened, never hidden.
     """
     with tempfile.TemporaryDirectory(prefix="bandchart_arrangement_") as tmp:
         work_dir = Path(tmp)
@@ -264,18 +274,10 @@ def run_solo_arrangement(
         ) = _detect_melody(melody_source, instrument, note_detection)
 
         support_notes: list[dict[str, Any]] = []
-        if instrument in SUPPORT_CAPABLE_INSTRUMENTS and arrangement_focus in (
-            "melody_support",
-            "piano_style",
-        ):
-            # "Piano-style" always aims for a fuller left hand, regardless
-            # of the difficulty control.
-            support_difficulty = (
-                "medium" if arrangement_focus == "piano_style" else arrangement_difficulty
-            )
+        if instrument in SUPPORT_CAPABLE_INSTRUMENTS and arrangement_focus == "melody_support":
             try:
                 support_notes, support_messages = _extract_support_notes(
-                    accompaniment_source, support_difficulty
+                    accompaniment_source, arrangement_density
                 )
             except Exception:  # noqa: BLE001
                 support_notes, support_messages = [], []
@@ -294,6 +296,18 @@ def run_solo_arrangement(
             )
             engine_messages = [*engine_messages, *group_messages]
         combined_notes.sort(key=lambda n: (n["start_time"], n["pitch"]))
+
+        # v0.9.8: "Fit to instrument range" — the last shaping step, after
+        # the note set is otherwise final. Only whole-octave phrase shifts
+        # (see app/range_fit.py); instruments with no profile (hidden from
+        # the main picker but still backend-supported) are left untouched.
+        range_fitting = "none"
+        profile = get_profile(instrument)
+        if profile is not None:
+            combined_notes, range_warnings, range_fitting = fit_notes_to_range(
+                combined_notes, profile.range_low, profile.range_high, profile.display_name
+            )
+            warnings.extend(range_warnings)
 
         if plan.instrument_note and engine_used != "pyin":
             warnings.append(plan.instrument_note)
@@ -324,11 +338,13 @@ def run_solo_arrangement(
             "fallback_reason": fallback_reason,
             "warnings": [*warnings, *engine_messages],
             "difficulty": difficulty,
-            # v1.0 Solo Arrangement status — always reported, never hidden.
+            # Solo Arrangement status — always reported, never hidden.
             "arrangement_source": arrangement_source,
             "separation_engine": separation_engine,
             "arrangement_focus": arrangement_focus,
-            "arrangement_difficulty": arrangement_difficulty,
+            "arrangement_density": arrangement_density,
+            # v0.9.8: "none" | "octave_shifted" | "simplified".
+            "range_fitting": range_fitting,
         }
 
         json_out_path.parent.mkdir(parents=True, exist_ok=True)

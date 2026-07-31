@@ -16,14 +16,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
+from app.instrument_profiles import PROFILES
 from app.polyphonic import MAX_POLYPHONY
 
-# Instruments capped below the default MAX_POLYPHONY when polyphonic
-# detection runs. Violin is realistically played as one line or, at most,
-# a double-stop (two strings at once) — anything beyond that is almost
-# certainly detector noise, not a real third note.
+# v0.9.8: the simultaneous-note cap per instrument now comes straight from
+# the central instrument profile table (piano=6, guitar=4, violin=2,
+# bass/alto_sax/trumpet/voice=1 — melody-only instruments capped at 1 so
+# even a manually-forced "poly" request degrades to monophonic output
+# instead of producing nonsense chords on a melody instrument). Instruments
+# with no profile (concert, flute, tenor_sax, clarinet, ukulele — hidden
+# from the main picker but still backend-supported) fall back to the
+# original global default via resolve_routing's .get(instrument, ...).
 INSTRUMENT_MAX_POLYPHONY: dict[str, int] = {
-    "violin": 2,
+    key: profile.max_simultaneous_notes for key, profile in PROFILES.items()
 }
 
 # Instruments where "Direct transcription" defaults straight to polyphonic
@@ -31,14 +36,19 @@ INSTRUMENT_MAX_POLYPHONY: dict[str, int] = {
 # instrument with an obvious grand-staff home).
 DIRECT_AUTO_POLY_INSTRUMENTS = {"piano"}
 # Instruments where "Solo arrangement" ALSO defaults to polyphonic
-# detection (v0.9.5: piano solo arrangements should keep their chords too,
-# not just direct transcriptions).
-SOLO_AUTO_POLY_INSTRUMENTS = {"piano"}
+# detection: piano (v0.9.5, keeps its chords) and guitar (v0.9.8 — Solo
+# Arrangement now attempts real playable multi-note TAB, so multiple-note
+# detection is worth defaulting to instead of melody-only).
+SOLO_AUTO_POLY_INSTRUMENTS = {"piano", "guitar"}
 
 INSTRUMENT_POLY_NOTES: dict[str, str] = {
+    # v0.9.8: guitar TAB now genuinely attempts a playable multi-note
+    # voicing (backend/app/tablature.py) rather than always collapsing to
+    # the top note — this caution reflects that it's still a best-effort,
+    # not full chord-shape TAB.
     "guitar": (
-        "Guitar chord/tab output is experimental. TAB may show the main "
-        "playable line first."
+        "Guitar TAB attempts a playable multi-note chord where it can. "
+        "Some notes may be simplified if the detected chord isn't playable."
     ),
     "violin": "Violin output is limited to melody and simple double-stops for now.",
 }

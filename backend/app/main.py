@@ -67,8 +67,8 @@ VALID_MODES = {"direct_transcription", "solo_arrangement"}
 VALID_TIME_SIGNATURES = {"predict", "4/4", "3/4", "6/8"}
 VALID_RHYTHM_DETAILS = {"readable", "precise"}
 VALID_NOTE_DETECTIONS = {"melody", "poly"}
-VALID_ARRANGEMENT_FOCUSES = {"main_melody", "melody_support", "piano_style"}
-VALID_ARRANGEMENT_DIFFICULTIES = {"easy", "medium"}
+VALID_ARRANGEMENT_FOCUSES = {"main_melody", "melody_support"}
+VALID_ARRANGEMENT_DENSITIES = {"simple", "balanced", "detailed"}
 # Quarter notes per bar at the fixed 120 BPM (0.5s per quarter).
 _BAR_SECONDS = {"4/4": 2.0, "3/4": 1.5, "6/8": 1.5}
 
@@ -133,13 +133,13 @@ def set_project_settings(project_id: str, body: ProjectSettings) -> Project:
         raise HTTPException(
             status_code=400,
             detail=f"'{body.arrangement_focus}' isn't an arrangement focus option. "
-            "Choose Main melody, Melody + simple support, or Piano-style arrangement.",
+            "Choose Main melody, or Melody + simple support.",
         )
-    if body.arrangement_difficulty not in VALID_ARRANGEMENT_DIFFICULTIES:
+    if body.arrangement_density not in VALID_ARRANGEMENT_DENSITIES:
         raise HTTPException(
             status_code=400,
-            detail=f"'{body.arrangement_difficulty}' isn't an arrangement difficulty "
-            "option. Choose Easy or Medium.",
+            detail=f"'{body.arrangement_density}' isn't an arrangement density "
+            "option. Choose Simple, Balanced or Detailed.",
         )
     project.instrument = body.instrument
     project.mode = body.mode
@@ -148,7 +148,7 @@ def set_project_settings(project_id: str, body: ProjectSettings) -> Project:
     project.rhythm_detail = body.rhythm_detail
     project.note_detection = body.note_detection
     project.arrangement_focus = body.arrangement_focus
-    project.arrangement_difficulty = body.arrangement_difficulty
+    project.arrangement_density = body.arrangement_density
     project.updated_at = storage.now_iso()
     storage.save_project(project)
     return project
@@ -375,7 +375,7 @@ def transcribe(project_id: str) -> Project:
                 instrument=project.instrument or "concert",
                 note_detection=project.note_detection or "melody",
                 arrangement_focus=project.arrangement_focus or "main_melody",
-                arrangement_difficulty=project.arrangement_difficulty or "easy",
+                arrangement_density=project.arrangement_density or "simple",
             )
         else:
             result = run_transcription(
@@ -454,7 +454,9 @@ def _save_working_notes(project: Project, notes: list[dict]) -> dict:
         "arrangement_source": None,
         "separation_engine": None,
         "arrangement_focus": None,
-        "arrangement_difficulty": None,
+        "arrangement_density": None,
+        # v0.9.8 range-fitting status ("none" | "octave_shifted" | "simplified").
+        "range_fitting": None,
     }
     json_path = storage.transcription_json_path(project.id)
     if json_path.exists():
