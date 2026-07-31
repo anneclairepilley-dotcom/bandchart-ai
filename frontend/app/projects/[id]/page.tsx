@@ -72,11 +72,19 @@ const ROUTING_MODE_LABELS: Record<string, string> = {
   double_stops: "Double-stops",
 };
 // v1.0 Solo Arrangement status labels — mirrors backend/app/arrangement.py.
+// v0.9.7.1: wording matches the request's exact "vocals / bass / other /
+// full mix" vocabulary for the "Stem used" status line.
 const ARRANGEMENT_SOURCE_LABELS: Record<string, string> = {
-  vocal_stem: "vocal stem",
-  bass_stem: "bass stem",
-  accompaniment: "accompaniment",
+  vocal_stem: "vocals",
+  bass_stem: "bass",
+  accompaniment: "other",
   full_mix: "full mix",
+};
+// v0.9.7.1: Solo Arrangement's 3-state source-separation read.
+const SEPARATION_STATUS_LABELS: Record<string, string> = {
+  demucs: "Demucs",
+  unavailable: "unavailable",
+  failed: "failed",
 };
 const ARRANGEMENT_FOCUS_LABELS: Record<string, string> = {
   main_melody: "Main melody",
@@ -1763,7 +1771,13 @@ export default function ProjectDetailPage() {
                 </p>
                 <p>Detection mode: {ROUTING_MODE_LABELS[notes.routing_mode ?? ""] ?? "Melody only"}</p>
                 <p>
-                  Source:{" "}
+                  Source separation:{" "}
+                  {SEPARATION_STATUS_LABELS[notes.separation_status ?? ""] ??
+                    notes.separation_status ??
+                    "unavailable"}
+                </p>
+                <p>
+                  Stem used:{" "}
                   {ARRANGEMENT_SOURCE_LABELS[notes.arrangement_source] ??
                     notes.arrangement_source}
                 </p>

@@ -48,6 +48,7 @@ from app.instrument_profiles import get_profile
 from app.polyphonic import MAX_POLYPHONY, _assign_groups, detect_notes_poly
 from app.range_fit import fit_notes_to_range
 from app.routing import RoutingPlan, describe_difficulty, resolve_routing, specialist_engine_for
+from app.separation import is_available as demucs_is_available
 from app.separation import separate_full
 from app.storage import now_iso
 from app.transcription import SAMPLE_RATE, _detect_notes, write_midi_from_notes
@@ -224,9 +225,10 @@ def run_solo_arrangement(
 
     Returns the same result shape as run_transcription, plus arrangement_source
     ("vocal_stem" | "bass_stem" | "accompaniment" | "full_mix"),
-    separation_engine ("demucs" or None), arrangement_focus,
-    arrangement_density and range_fitting ("none" | "octave_shifted" |
-    "simplified") — so the UI can show exactly what happened, never hidden.
+    separation_engine ("demucs" or None), separation_status ("demucs" |
+    "unavailable" | "failed", v0.9.7.1), arrangement_focus, arrangement_density
+    and range_fitting ("none" | "octave_shifted" | "simplified") — so the UI
+    can show exactly what happened, never hidden.
     """
     with tempfile.TemporaryDirectory(prefix="bandchart_arrangement_") as tmp:
         work_dir = Path(tmp)
@@ -234,8 +236,13 @@ def run_solo_arrangement(
 
         # v0.9.6: full 4-stem separation (vocals/drums/bass/other) so every
         # instrument can follow its own most-relevant stem, not just a
-        # vocals-vs-everything-else split.
-        separation_result = separate_full(prepared_path, work_dir)
+        # vocals-vs-everything-else split. v0.9.7.1: separation is now tried
+        # BEFORE transcription for every Solo Arrangement (this was already
+        # the pipeline order since v1.0 — this version's request re-confirms
+        # it and adds a 3-state status so "not installed" and "installed but
+        # errored" are never lumped together as one silent "didn't work").
+        demucs_available, _demucs_reason = demucs_is_available()
+        separation_result = separate_full(prepared_path, work_dir) if demucs_available else None
         warnings: list[str] = [
             "Solo Arrangement finds the strongest melody and creates a "
             "playable part. Dense songs may need editing."
@@ -243,7 +250,12 @@ def run_solo_arrangement(
         separation_engine: Optional[str] = None
         if separation_result is not None:
             separation_engine = "demucs"
+            separation_status = "demucs"
+        elif demucs_available:
+            separation_status = "failed"
+            warnings.append("Source separation failed. Using full mix instead.")
         else:
+            separation_status = "unavailable"
             warnings.append("Source separation failed. Using full mix instead.")
 
         # accompaniment_source feeds BOTH the melody source for Piano/Guitar
@@ -341,6 +353,10 @@ def run_solo_arrangement(
             # Solo Arrangement status — always reported, never hidden.
             "arrangement_source": arrangement_source,
             "separation_engine": separation_engine,
+            # v0.9.7.1: "demucs" (it ran) | "unavailable" (not installed) |
+            # "failed" (installed but errored) — separation_engine above is
+            # kept for back-compat, this is the honest 3-state read.
+            "separation_status": separation_status,
             "arrangement_focus": arrangement_focus,
             "arrangement_density": arrangement_density,
             # v0.9.8: "none" | "octave_shifted" | "simplified".

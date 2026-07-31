@@ -1,6 +1,6 @@
 # BandChart AI — Project Notes
 
-Living notes for contributors (human or AI). Last updated after v0.9.8 (2026-07).
+Living notes for contributors (human or AI). Last updated after v0.9.7.1 (2026-07).
 If you are a new Claude Code session: read this file, then README.md, before changing code.
 
 ## Purpose
@@ -220,6 +220,104 @@ Explanations, error messages, and README instructions must stay beginner-friendl
   padding, readable-mode long-note truncation, a Start double-click race, the
   0.0-certainty mask, same-slot keep-later inconsistency, stale YouTube copy, stale
   setupError, and the frontend's hardcoded 2s bars — all fixed and re-verified
+
+### v0.9.7.1 — stem separation before transcription (done)
+Request literally said "Build BandChart AI v0.9.7.1 only" and its suggested commit
+message said the same, but the pass-mark section further down the same request said
+"v0.9.8 passes if..." — v0.9.8 (instrument-focused Solo Arrangement) had already shipped
+in full in the immediately preceding turn with unrelated content, so that's almost
+certainly a copy-paste leftover from whatever template produced the request, not a real
+instruction to overwrite it. Went with **v0.9.7.1**, the name stated twice and never used
+before, and flagged the mismatch to the owner rather than guessing which one they
+actually meant (same judgment-call pattern as the v0.9.7→v0.9.8 rename the turn before).
+
+Goal: "Stop dense full-song transcription by adding proper stem separation before
+transcription." Read this PROJECT_NOTES.md file first, as instructed — and found that
+almost everything requested was **already built**: Demucs 4-stem separation
+(`app/separation.py`, v1.0/v0.9.6), Piano Expert (`app/piano_expert.py`, v0.9.6), and
+Solo Arrangement's per-instrument stem routing (`app/arrangement.py`, v0.9.6) already
+match the request's exact routing table (Bass→bass stem, Piano/Guitar→accompaniment
+stem, Voice/Violin/Alto Sax/Trumpet→vocal stem) and already run separation BEFORE
+transcription, already degrading honestly to the full mix with the exact message
+"Source separation failed. Using full mix instead." when Demucs isn't available — which
+it still isn't, here (see below). So this version's real work was the genuine gaps, not
+a rebuild:
+
+**Re-investigated Demucs/Piano Expert from scratch, not from memory** (Feature 3's
+explicit ask): direct `curl` against all four previously-blocking hosts
+(`download.pytorch.org`, `zenodo.org`, `dl.fbaipublicfiles.com`, `huggingface.co`) in
+this session's fresh container, before writing any code. All four still return 403 at
+the TCP CONNECT level (re-confirmed, not assumed); `pypi.org` (control) returns 200.
+Identical to every prior version's finding — this environment's network policy hasn't
+changed. Didn't burn time/disk on a multi-GB `pip install` that would only reconfirm the
+same checkpoint-host block at runtime; the direct curl is actually stronger evidence for
+that specific claim than an install attempt would be.
+
+**`backend/app/arrangement.py`** — `run_solo_arrangement()` gains `separation_status`
+("demucs" | "unavailable" | "failed"), a genuine 3-state read computed by calling
+`separation.is_available()` before `separate_full()`, instead of collapsing "Demucs isn't
+installed" and "Demucs is installed but errored" into the same `separation_engine: None`.
+`separation_engine` (`"demucs"` or `None`) is kept as-is for back-compat. Unit-tested all
+three states via `unittest.mock.patch` (the "unavailable" state is also exercised live,
+every real run in this sandbox hits it): "unavailable" confirmed live; "failed"
+(`demucs_is_available` → True, `separate_full` → None) and "demucs" (both mocked to
+succeed, with a fake `SeparationResult`) confirmed via monkeypatch, since real Demucs
+can't run here.
+
+**`backend/app/transcription.py`** — Feature 5's new warning: when `mode ==
+"direct_transcription"` and the existing `describe_difficulty()` read comes back "Dense
+piano/audio — may need editing", `run_transcription()` now also appends "Direct
+transcription on a full mix may be dense. Use Solo Arrangement for a cleaner playable
+version." to `warnings`. Deliberately reuses the existing density signal instead of
+guessing from audio duration (a clean, minutes-long instrument recording shouldn't
+trigger a "this might be a full mix" warning just for being long) — one signal, already
+trusted elsewhere in the app, not a new heuristic invented for this. Verified it does NOT
+fire on a simple clean chord (no false positive) and DOES fire on a synthetic
+Mrs-Magic-style dense piano passage.
+
+**`backend/app/engine_lab/adapters.py`** — Feature 6's gap: only `demucs_vocals` existed
+(v0.9.6); added `demucs_bass` and `demucs_other`, both sharing a new `_run_demucs_stem()`
+helper (separate with Demucs, run Basic Pitch on the named stem) so the lab can compare
+all three separated-stem+Basic-Pitch combinations against full-mix Basic Pitch and Piano
+Expert on the same source audio — exactly what Bass and Piano/Guitar Solo Arrangement
+actually use when Demucs is available. **No frontend changes needed** for this — same as
+v0.9.6's finding, `app/engine-lab/page.tsx` already renders the engine list, note count,
+overlapping-note count, warnings, MIDI/JSON downloads and "Use this output" generically
+from `GET /engine-lab/engines` / `POST /engine-lab/runs`; the two new adapters just show
+up. Verified: both list with the same honest "Demucs isn't installed" reason as
+`demucs_vocals`, and running either one returns a friendly 400, never a crash.
+
+**Frontend** (`app/projects/[id]/page.tsx`, `lib/api.ts`) — `NotesResponse` gains
+`separation_status`. The Solo Arrangement status block gains a **"Source separation:"**
+line (Demucs / unavailable / failed) and the existing "Source:" line is relabelled
+**"Stem used:"** with its value wording changed to match the request's exact vocabulary
+("vocals" / "bass" / "other" / "full mix" instead of "vocal stem" / "accompaniment") —
+`ARRANGEMENT_SOURCE_LABELS` updated, its one call site unaffected. Direct transcription's
+new dense-full-mix warning needed no new UI at all — it's just another string in the
+`warnings` array the existing status block already renders.
+
+**Testing**: 26 checks against a live server (C major gate re-verified with Piano Expert
+correctly unavailable so Basic Pitch is engine_used; A4 tone on Voice; a synthetic dense
+piano piece triggering the new Direct-mode warning and NOT a simple clean chord; Solo
+Arrangement honestly reporting `separation_status: "unavailable"` and falling back to
+`full_mix` for Piano/Voice/Bass; Engine Lab listing and gracefully 400-ing the two new
+adapters) — all passed. 3 monkeypatched unit tests covering the "failed" and "demucs"
+`separation_status` states that can't occur live here. Re-ran the full 22-check v0.9.8
+baseline suite (Piano chord grouping, Guitar multi-note TAB, Bass/Sax/Trumpet/Voice range
+fitting, Violin double-stop cap, density scaling) — all still passed, confirming this
+version didn't regress the previous one. 7 Playwright checks against a production build
+(the new status lines render with the right wording; Engine Lab shows the two new engines
+and their unavailable reasons) — all passed.
+
+**Honest Mrs Magic report (Test 3, as required)**: could NOT be verified whether Demucs +
+Piano Expert/Basic Pitch beats full-mix Basic Pitch on real Mrs Magic audio — Demucs and
+Piano Expert remain fully document-only in every environment this app has been tested in,
+re-confirmed this version via direct network checks, not assumption. What WAS verified:
+the pipeline runs coherently end-to-end when separation is unavailable (honest status,
+clean fallback, no crash), and Direct transcription on a dense piece now surfaces a
+concrete suggestion to try Solo Arrangement instead. The owner would need to test on a
+Mac (where Piano Expert was previously confirmed to actually install and run, per
+v0.9.6's investigation) to get a real before/after on the underlying quality question.
 
 ### v0.9.8 — instrument-focused Solo Arrangement (done)
 Request said "Build BandChart AI v0.9.7 only," but v0.9.7 (Basic Pitch tuning from real

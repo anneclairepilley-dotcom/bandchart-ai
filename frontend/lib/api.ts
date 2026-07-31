@@ -109,6 +109,8 @@ export interface NotesResponse {
   arrangement_source?: string | null;
   /** Which source-separation engine ran, if any: "demucs" or null. */
   separation_engine?: string | null;
+  /** v0.9.7.1 3-state read: "demucs" (ran) | "unavailable" (not installed) | "failed" (installed but errored). */
+  separation_status?: "demucs" | "unavailable" | "failed" | null;
   arrangement_focus?: "main_melody" | "melody_support" | null;
   arrangement_density?: "simple" | "balanced" | "detailed" | null;
   /** v0.9.8 "Fit to instrument range" outcome: "none" | "octave_shifted" | "simplified". */
