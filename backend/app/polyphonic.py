@@ -18,6 +18,16 @@ Both engines are honest about being rough: quiet inner voices, dense
 harmonies and noisy recordings will be missed or simplified. If everything
 goes wrong the caller falls back to the reliable melody-only pYIN pipeline
 with a clear message.
+
+v0.9.7: real owner feedback testing Basic Pitch against a real recording
+("Mrs Magic") reported missing notes and a cluttered result. Two targeted
+fixes, both Basic-Pitch-specific (the CQT fallback is unchanged): harmonic
+suppression no longer treats the octave as a suppressible interval for
+Basic Pitch (real octave doublings are common, intentional piano writing,
+not a spectral ghost — see BP_HARMONIC_INTERVALS), and consecutive
+identical-pitch-set chord events close together in time are merged (real
+piano sustain-pedal resonance can make Basic Pitch re-trigger the same held
+chord several times in a row — see _merge_repeated_chords).
 """
 
 from __future__ import annotations
@@ -46,6 +56,17 @@ ABSOLUTE_FLOOR = 0.02
 # is nearly as strong as the note itself.
 HARMONIC_INTERVALS = (12, 19, 24, 28)
 HARMONIC_TOLERANCE = 0.8
+# v0.9.7: Basic Pitch is a trained model with much better inherent pitch
+# discrimination than the CQT heuristic above (which has no real sense of
+# "is this a played note" and genuinely needs the full harmonic list to
+# avoid spectral ghosts) — so it only needs the rarer, more clearly
+# artifact-like intervals. The octave (+12) is deliberately EXCLUDED here:
+# octave doublings (a bass note and its octave played together, a melody
+# doubled an octave up) are extremely common, intentional piano writing —
+# suppressing them was dropping real notes on real (non-synthetic) piano
+# recordings, confirmed against real-world feedback (the "Mrs Magic"
+# benchmark: missing notes in octave-doubled passages).
+BP_HARMONIC_INTERVALS = (19, 24, 28)
 
 
 def _make_note(pitch: int, start: float, duration: float, confidence: float) -> dict[str, Any]:
@@ -173,12 +194,15 @@ def _rejoin_split_events(
     return merged
 
 
-def _suppress_harmonics(notes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _suppress_harmonics(
+    notes: list[dict[str, Any]], intervals: tuple[int, ...] = HARMONIC_INTERVALS
+) -> list[dict[str, Any]]:
     """Drop weak harmonic ghosts inside chord clusters.
 
-    Within notes starting together, a note +12/+19/+24/+28 semitones above
-    a clearly stronger one is almost always that note's overtone leaking
-    through, not a played pitch (same rule the CQT fallback uses).
+    Within notes starting together, a note above another by one of
+    `intervals` semitones is almost always that note's overtone leaking
+    through, not a played pitch (same rule the CQT fallback uses) — unless
+    it's nearly as strong as the note itself, in which case it's kept.
     """
     kept: list[dict[str, Any]] = []
     notes = sorted(notes, key=lambda n: (n["start_time"], n["pitch"]))
@@ -195,7 +219,7 @@ def _suppress_harmonics(notes: list[dict[str, Any]]) -> list[dict[str, Any]]:
             index += 1
         for note in cluster:
             ghost = any(
-                note["pitch"] - other["pitch"] in HARMONIC_INTERVALS
+                note["pitch"] - other["pitch"] in intervals
                 and note["confidence"] < HARMONIC_TOLERANCE * other["confidence"]
                 for other in cluster
                 if other is not note
@@ -203,6 +227,54 @@ def _suppress_harmonics(notes: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if not ghost:
                 kept.append(note)
     return kept
+
+
+# v0.9.7: consecutive chord/note events repeating the EXACT same pitch set
+# within this gap are almost always the same held chord re-triggering
+# (sustain-pedal resonance on a real piano) rather than a fresh strike —
+# merging them cuts visual/rhythmic clutter on the engraved sheet without
+# dropping a single real pitch.
+CHORD_REPEAT_GAP_S = 0.25
+
+
+def _merge_repeated_chords(notes: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+    """Merge consecutive events sharing the same pitch set into one longer
+    event when they're close together in time. Returns (notes, merged_count)."""
+    notes = sorted(notes, key=lambda n: (n["start_time"], n["pitch"]))
+    events: list[list[dict[str, Any]]] = []
+    index = 0
+    while index < len(notes):
+        group = notes[index].get("group")
+        event = [notes[index]]
+        index += 1
+        if group:
+            while index < len(notes) and notes[index].get("group") == group:
+                event.append(notes[index])
+                index += 1
+        events.append(event)
+
+    merged_events: list[list[dict[str, Any]]] = []
+    merged_count = 0
+    for event in events:
+        pitch_set = frozenset(n["pitch"] for n in event)
+        event_start = min(n["start_time"] for n in event)
+        if merged_events:
+            last = merged_events[-1]
+            last_pitch_set = frozenset(n["pitch"] for n in last)
+            last_end = max(n["start_time"] + n["duration"] for n in last)
+            if pitch_set == last_pitch_set and event_start - last_end <= CHORD_REPEAT_GAP_S:
+                new_end = max(n["start_time"] + n["duration"] for n in event)
+                for member in last:
+                    member["duration"] = round(
+                        max(member["duration"], new_end - member["start_time"]), 4
+                    )
+                merged_count += 1
+                continue
+        merged_events.append(event)
+
+    result = [n for event in merged_events for n in event]
+    result.sort(key=lambda n: (n["start_time"], n["pitch"]))
+    return result, merged_count
 
 
 def _detect_with_basic_pitch(
@@ -243,10 +315,13 @@ def _detect_with_basic_pitch(
         )
 
     before_harmonics = len(notes)
-    notes = _suppress_harmonics(notes)
+    notes = _suppress_harmonics(notes, intervals=BP_HARMONIC_INTERVALS)
     dropped_weak += before_harmonics - len(notes)
 
     notes, messages = _assign_groups(notes, max_polyphony=max_polyphony)
+    notes, merged_chords = _merge_repeated_chords(notes)
+    if merged_chords:
+        messages.append("Repeated chord events were merged to reduce clutter.")
     if dropped_weak:
         messages.append("Low-confidence notes were removed.")
     return notes, messages
