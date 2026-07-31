@@ -328,6 +328,16 @@ def run_transcription(
     warnings = list(engine_messages)
     if plan.instrument_note and engine_used != "pyin":
         warnings.append(plan.instrument_note)
+    # v0.9.7.1: Direct transcription is for one clear instrument/voice — when
+    # the result comes back reading as genuinely dense, that's usually a
+    # sign a full song/mix was uploaded instead. Reuses the same honest
+    # density read the status line already shows, rather than guessing from
+    # audio duration (a clean instrument recording can be minutes long too).
+    if mode == "direct_transcription" and difficulty == "Dense piano/audio — may need editing":
+        warnings.append(
+            "Direct transcription on a full mix may be dense. Use Solo "
+            "Arrangement for a cleaner playable version."
+        )
 
     write_midi_from_notes(notes, midi_out_path)
 

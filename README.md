@@ -2,13 +2,29 @@
 
 AI music arranging and rehearsal app that turns songs into editable lead sheets, solo sheets, band charts and custom arrangements.
 
-## v0.9.8 — Instrument-focused Solo Arrangement
+## v0.9.7.1 — stem separation before transcription
 
 This is the smallest possible working prototype: a local web app where you upload an audio
 file and the backend runs **real audio-to-pitch transcription**. Everything runs on your own
 computer — no accounts, no payments, no cloud services, no data leaves your machine.
 
-**v0.9.8 narrows the app around the 7 real instruments it's actually built for — Guitar,
+**v0.9.7.1 makes Solo Arrangement's existing stem-separation step more honest and visible,
+and gives Direct transcription a nudge toward Solo Arrangement when a full mix comes back
+dense.** Most of what this version asked for — Demucs 4-stem separation, Piano Expert,
+and per-instrument stem routing (Bass → bass stem, Piano/Guitar → accompaniment stem,
+Voice/Violin/Alto Sax/Trumpet → vocal stem) — turned out to already exist (v1.0/v0.9.6);
+the real gaps closed this version: the results page now shows a genuine 3-value
+**"Source separation: Demucs / unavailable / failed"** line instead of a single Yes/No
+read, alongside a relabelled **"Stem used: vocals / bass / other / full mix"**; Direct
+transcription on a dense recording now suggests *"Use Solo Arrangement for a cleaner
+playable version"*; and Engine Lab gained `demucs_bass`/`demucs_other` adapters
+(alongside the existing `demucs_vocals`) so all three separated-stem options can be
+compared against full-mix Basic Pitch and Piano Expert directly. Demucs and Piano Expert
+were re-investigated from scratch (not from memory) and remain document-only in every
+environment this app has been tested in — see **Transcription engine stack** below for
+exactly why.
+
+**v0.9.8 narrowed the app around the 7 real instruments it's actually built for — Guitar,
 Bass, Piano, Violin, Alto Sax, Trumpet, Voice — and makes Solo Arrangement genuinely
 instrument-aware instead of one-size-fits-all.** The instrument picker (and the "Solo
 instrument" selector on the results page) now show only those 7; Concert pitch and the
@@ -296,8 +312,10 @@ of unused CUDA packages. On top of that, their model checkpoints download from h
 that are ALSO network-blocked in those environments (`zenodo.org` for Piano Expert,
 `dl.fbaipublicfiles.com`/`huggingface.co` for Demucs) — so even a successful install
 can't fetch a working model there. **Neither of these is a fixable bug in BandChart AI**
-— they're environment network policy, confirmed by directly testing the actual hosts.
-If you're on a Mac with a normal, unrestricted internet connection, both are worth
+— they're environment network policy, confirmed by directly testing the actual hosts
+(re-confirmed again in v0.9.7.1 with a fresh `curl` against all four hosts before writing
+any code that version — still 403 at the TCP CONNECT level, identical to every previous
+check). If you're on a Mac with a normal, unrestricted internet connection, both are worth
 trying — see the installation commands above, and check `/engine-lab` afterwards to
 confirm they show as available.
 
@@ -310,7 +328,7 @@ v0.9.5.
 
 ---
 
-## Solo Arrangement (v1.0, stem routing upgraded in v0.9.6, instrument-aware in v0.9.8)
+## Solo Arrangement (v1.0, stem routing upgraded in v0.9.6, instrument-aware in v0.9.8, honest separation status in v0.9.7.1)
 
 Solo Arrangement is for turning a **full song** into a playable solo part — different
 from Direct transcription, which is for a clean recording of one instrument or voice.
@@ -349,24 +367,39 @@ Instrument: Guitar
 Mode: Solo arrangement
 Engine used: Basic Pitch
 Detection mode: Multiple notes
-Source: accompaniment
+Source separation: unavailable
+Stem used: other
 Arrangement focus: Melody + support
 Arrangement density: Balanced
 Range fitting: Octave-shifted to fit range
 Warnings: Dense audio may need editing
 ```
-(Direct transcription projects show the same Instrument/Mode/Engine used/Detection mode
-lines, without the Solo-Arrangement-only ones.) You'll also see one of these exact
-messages depending on what happened: *"Solo Arrangement finds the strongest melody and
-creates a playable part. Dense songs may need editing."* (always), *"Using vocal stem for
-main melody."* (isolation worked, and this instrument uses the vocal stem), *"Source
-separation failed. Using full mix instead."* (separation isn't available — this is the
-normal case in the hosted environments this app has been tested in, see **Transcription
-engine stack** above), *"Added simple support notes. Please check and edit."* (when
-support notes were added), *"Some notes were octave-shifted to fit &lt;Instrument&gt;."*
-(v0.9.8 range fitting moved something), and *"Some guitar notes were simplified because
-the detected chord was not playable."* (v0.9.8 — Guitar TAB couldn't fit every note of a
-detected chord onto the fretboard and dropped the least useful one).
+**"Source separation"** (v0.9.7.1) is a genuine 3-value read, never a simple yes/no:
+*Demucs* (it ran and produced stems for this project), *unavailable* (Demucs isn't
+installed — the normal case in the hosted environments this app has been tested in), or
+*failed* (Demucs is installed but errored on this particular audio). **"Stem used"**
+(renamed from "Source" in v0.9.7.1) is *vocals* / *bass* / *other* / *full mix* — which
+one it actually ran detection on. (Direct transcription projects show the same
+Instrument/Mode/Engine used/Detection mode lines, without the Solo-Arrangement-only
+ones — and, v0.9.7.1, may show a dense-full-mix suggestion instead; see below.) You'll
+also see one of these exact messages depending on what happened: *"Solo Arrangement finds
+the strongest melody and creates a playable part. Dense songs may need editing."*
+(always), *"Using vocal stem for main melody."* (isolation worked, and this instrument
+uses the vocal stem), *"Source separation failed. Using full mix instead."* (separation
+isn't available or failed — see **Transcription engine stack** above), *"Added simple
+support notes. Please check and edit."* (when support notes were added), *"Some notes
+were octave-shifted to fit &lt;Instrument&gt;."* (v0.9.8 range fitting moved something),
+and *"Some guitar notes were simplified because the detected chord was not playable."*
+(v0.9.8 — Guitar TAB couldn't fit every note of a detected chord onto the fretboard and
+dropped the least useful one).
+
+**Direct transcription on a dense full mix** (v0.9.7.1): Direct transcription stays
+different from Solo Arrangement — no stem separation, it just runs detection on whatever
+you uploaded. But if the result comes back reading as genuinely dense (the same density
+read the status line already shows), you'll now also see: *"Direct transcription on a
+full mix may be dense. Use Solo Arrangement for a cleaner playable version."* — a
+suggestion, not a block; Direct transcription still runs and still works, this just
+points at the better tool for a full song.
 
 **What this is not**: BandChart AI does not claim to perfectly separate every instrument,
 and Solo Arrangement does not claim to perfectly transcribe a full band. It finds the
@@ -460,7 +493,7 @@ every release.
 
 ---
 
-## Engine Lab (v0.9.4, "Use this output" added in v0.9.5)
+## Engine Lab (v0.9.4, "Use this output" added in v0.9.5, per-stem adapters completed in v0.9.7.1)
 
 BandChart's note detection is genuinely hard to get right, especially on real piano
 recordings — see "Mrs Magic" below. Rather than keep swapping the main engine and hoping,
@@ -505,7 +538,9 @@ becomes a project's active transcription.
 | Basic Pitch (Spotify) | ✅ Available | The app's current main polyphonic engine. Detects chords exactly on clean synthetic audio |
 | Built-in simple detector (CQT) | ✅ Available | The v0.9.2 fallback (no external model). Comparable to Basic Pitch on clean audio, faster, no model download |
 | Piano Expert (ByteDance) | ⚙️ Available if installed (v0.9.6) | Real adapter — active automatically once `piano_transcription_inference` is installed and its checkpoint loads. Not installed by default; see **Transcription engine stack** above |
-| Demucs + Basic Pitch (v0.9.6) | ⚙️ Available if installed | Separates with Demucs, then runs Basic Pitch on the isolated vocal stem — compare against running Basic Pitch on the full mix directly. Not installed by default |
+| Demucs + Basic Pitch, vocal separation (v0.9.6) | ⚙️ Available if installed | Separates with Demucs, then runs Basic Pitch on the isolated vocal stem — what Voice/Violin/Alto Sax/Trumpet Solo Arrangement actually uses when Demucs works |
+| Demucs + Basic Pitch, bass separation (v0.9.7.1) | ⚙️ Available if installed | Same separation, isolated bass stem — what Bass Solo Arrangement actually uses when Demucs works |
+| Demucs + Basic Pitch, accompaniment separation (v0.9.7.1) | ⚙️ Available if installed | Same separation, isolated "other" stem — what Piano/Guitar Solo Arrangement actually use when Demucs works |
 | Omnizart | ⛔ Investigated, not active | See below |
 | MT3 (Magenta) | ⛔ Investigated, not active | See below |
 
@@ -1050,13 +1085,16 @@ melody"`, `"Some overlapping notes"`, `"Dense piano/audio — may need editing"`
 notes detected"`).
 
 For Solo Arrangement projects (v1.0, stems upgraded in v0.9.6, density/range fitting in
-v0.9.8), it additionally carries: `arrangement_source` (`"vocal_stem"` | `"bass_stem"` |
-`"accompaniment"` | `"full_mix"`), `separation_engine` (`"demucs"` or `null`),
+v0.9.8, honest separation status in v0.9.7.1), it additionally carries: `arrangement_source`
+(`"vocal_stem"` | `"bass_stem"` | `"accompaniment"` | `"full_mix"`), `separation_engine`
+(`"demucs"` or `null`, kept for back-compat), `separation_status` (`"demucs"` | `"unavailable"`
+| `"failed"`, v0.9.7.1 — the 3-state read the "Source separation" status line uses),
 `arrangement_focus` (`"main_melody"` | `"melody_support"` — `"piano_style"` was dropped in
 v0.9.8), `arrangement_density` (`"simple"` | `"balanced"` | `"detailed"` — renamed from
 `arrangement_difficulty`'s `"easy"`/`"medium"` in v0.9.8), and `range_fitting` (`"none"` |
 `"octave_shifted"` | `"simplified"`, v0.9.8) — `null`/absent for Direct transcription
-projects.
+projects. Direct transcription's `warnings` may additionally include a dense-full-mix
+suggestion (v0.9.7.1, see **Solo Arrangement** above).
 
 ### Engine Lab endpoints (v0.9.4, separate from the main pipeline)
 

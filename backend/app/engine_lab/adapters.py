@@ -109,10 +109,11 @@ def _demucs_available() -> tuple[bool, Optional[str]]:
     return demucs_is_available()
 
 
-def _run_demucs_vocals(audio_path: Path) -> EngineRunOutput:
-    """Separate with Demucs, then run Basic Pitch on the isolated vocal
-    stem — lets the lab compare "separation + detection" against running
-    detection on the full mix directly, on the exact same source audio."""
+def _run_demucs_stem(audio_path: Path, stem: str, label: str) -> EngineRunOutput:
+    """Shared body for the three demucs_<stem> adapters below: separate with
+    Demucs, then run Basic Pitch on ONE isolated stem — lets the lab compare
+    "separation + detection" against running detection on the full mix
+    directly, on the exact same source audio, one stem at a time."""
     import tempfile
 
     from app.polyphonic import _detect_with_basic_pitch
@@ -123,11 +124,24 @@ def _run_demucs_vocals(audio_path: Path) -> EngineRunOutput:
         result = separate_full(audio_path, work_dir)
         if result is None:
             raise RuntimeError("Source separation failed. Using full mix instead.")
-        notes, messages = _detect_with_basic_pitch(result.vocals_path)
+        stem_path = getattr(result, f"{stem}_path")
+        notes, messages = _detect_with_basic_pitch(stem_path)
         return EngineRunOutput(
             notes=notes,
-            messages=["Demucs separated the vocal stem before Basic Pitch ran.", *messages],
+            messages=[f"Demucs separated the {label} stem before Basic Pitch ran.", *messages],
         )
+
+
+def _run_demucs_vocals(audio_path: Path) -> EngineRunOutput:
+    return _run_demucs_stem(audio_path, "vocals", "vocals")
+
+
+def _run_demucs_bass(audio_path: Path) -> EngineRunOutput:
+    return _run_demucs_stem(audio_path, "bass", "bass")
+
+
+def _run_demucs_other(audio_path: Path) -> EngineRunOutput:
+    return _run_demucs_stem(audio_path, "other", "accompaniment/other")
 
 
 ADAPTERS: list[EngineAdapter] = [
@@ -187,6 +201,28 @@ ADAPTERS: list[EngineAdapter] = [
         ),
         availability_check=_demucs_available,
         run_fn=_run_demucs_vocals,
+    ),
+    EngineAdapter(
+        key="demucs_bass",
+        label="Demucs + Basic Pitch (bass separation)",
+        description=(
+            "Same Demucs 4-stem separation, but runs Basic Pitch on the isolated "
+            "bass stem — this is what Bass Solo Arrangement actually uses when "
+            "Demucs is available (v0.9.7.1)."
+        ),
+        availability_check=_demucs_available,
+        run_fn=_run_demucs_bass,
+    ),
+    EngineAdapter(
+        key="demucs_other",
+        label="Demucs + Basic Pitch (accompaniment separation)",
+        description=(
+            "Same Demucs 4-stem separation, but runs Basic Pitch on the isolated "
+            "\"other\" stem (non-vocal, non-drum, non-bass) — this is what Piano and "
+            "Guitar Solo Arrangement actually use when Demucs is available (v0.9.7.1)."
+        ),
+        availability_check=_demucs_available,
+        run_fn=_run_demucs_other,
     ),
     EngineAdapter(
         key="omnizart",
