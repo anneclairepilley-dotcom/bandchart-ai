@@ -2,13 +2,25 @@
 
 AI music arranging and rehearsal app that turns songs into editable lead sheets, solo sheets, band charts and custom arrangements.
 
-## v0.9.6 — a serious transcription engine stack
+## v0.9.7 — Basic Pitch tuning from real Mrs Magic feedback
 
 This is the smallest possible working prototype: a local web app where you upload an audio
 file and the backend runs **real audio-to-pitch transcription**. Everything runs on your own
 computer — no accounts, no payments, no cloud services, no data leaves your machine.
 
-v0.9.6 is entirely about transcription **quality**. Basic Pitch (v0.9.3) was a real
+**v0.9.7 is a small, targeted quality patch driven by a real test result**, not a
+synthetic benchmark: the owner ran Mrs Magic locally on their Mac (Basic Pitch, Piano
+Expert not installed there) and reported it "got the main idea and the multiple notes
+but wasn't perfect" — wrong notes, missing notes, timing off, and too dense to read.
+Two of those were fixed with real evidence behind the change: Basic Pitch's harmonic-
+ghost filter was dropping **real octave doublings** (a bass note played with its own
+octave — extremely common, intentional piano writing) because it was reusing a rule
+tuned for a completely different, much cruder fallback engine; and repeated chord
+events from sustain-pedal resonance are now merged instead of cluttering the sheet.
+Timing/rhythm accuracy is flagged as a separate, bigger gap (real tempo detection
+doesn't exist yet) rather than patched blind — see **Current limitations** below.
+
+v0.9.6 was entirely about transcription **quality**. Basic Pitch (v0.9.3) was a real
 improvement over the original pYIN-only engine, but it still isn't accurate enough on
 dense piano recordings or full songs — the "Mrs Magic" hard benchmark below is the
 honest reality check. This version adds two more specialist engines to the stack —
@@ -132,7 +144,11 @@ Two detection engines are selectable in the main app (v0.9.3):
   works best with clear piano or simple chords, reports when weak notes were removed or
   a moment was simplified, falls back with a clear message when the model is missing or
   finds nothing usable, and the tab stays melody-first (top note of each chord, with a
-  note saying so). This is NOT full band or complex-piano transcription
+  note saying so). This is NOT full band or complex-piano transcription. **v0.9.7**:
+  octave doublings (a bass note played with its own octave) no longer get mistaken for
+  harmonic ghosts and dropped, and repeated chord events from sustain-pedal resonance
+  are merged instead of cluttering the sheet — both fixed from real feedback testing
+  against a hard real-world recording, not just synthetic test clips
 - **Smart transcription routing** (v0.9.5): Piano now defaults to multiple-note
   detection in BOTH Direct transcription and Solo arrangement (grand staff either way);
   Guitar and Violin can use multiple-note detection too, with Violin capped at 2
@@ -378,14 +394,15 @@ explicit "Use this output" button (v0.9.5, step 5 below), the only way a lab res
 becomes a project's active transcription.
 
 **What it does:**
-1. Choose audio: one of five **built-in synthetic test clips** (A4 tone, C major chord,
-   C major scale, simple block chords, left-hand bass + right-hand melody), an **existing
-   project's audio**, or a **direct upload** just for the lab
+1. Choose audio: one of six **built-in synthetic test clips** (A4 tone, C major chord,
+   C major scale, simple block chords, left-hand bass + right-hand melody, and — new in
+   v0.9.7 — octave-doubled bass + melody, a permanent regression test for the real-world
+   fix below), an **existing project's audio**, or a **direct upload** just for the lab
 2. Pick one engine and click **Run engine** — the result (processing time, note count,
    overlapping notes, chord groups, pitch range, any warnings, MIDI/JSON download links,
    and a small piano-roll debug view) is added to a comparison table, so you can run
    several engines on the same clip and see them side by side
-3. For the five built-in test clips, every note's correct pitch and timing is known in
+3. For the six built-in test clips, every note's correct pitch and timing is known in
    advance, so the lab also shows a **rough accuracy score**: correct/missed/extra notes,
    whether simultaneous notes were preserved together, and mean timing error. This is
    deliberately simple (exact pitch match, generous timing tolerance) — good enough to
@@ -474,10 +491,20 @@ from this cloud environment** — YouTube blocks import attempts from cloud serv
 limitation as the rest of the app; see "Run locally on Mac for YouTube import" below), on
 top of Piano Expert/Demucs being document-only there anyway. Run it on a real Mac with
 Piano Expert and/or Demucs installed; no engine is expected to solve it perfectly, and
-v0.9.6 does NOT claim it's solved — the honest goal is an editable, non-collapsed-to-
+v0.9.7 does NOT claim it's solved — the honest goal is an editable, non-collapsed-to-
 one-line result you can clean up, not a perfect transcription. **If you do get a chance
 to test this, the results would genuinely help decide whether Piano Expert becomes the
 piano default in a future version.**
+
+**Real result so far (v0.9.7):** the owner did run this on their Mac with Basic Pitch
+(Piano Expert wasn't installed there) — "got the main idea and the multiple notes but
+wasn't perfect": wrong notes, missing notes, timing/rhythm off, and too dense to read.
+v0.9.7 fixed two of those with real evidence behind the change (octave doublings no
+longer dropped as false harmonics; repeated chord events merged instead of cluttering
+the sheet) — see the Multiple-note detection bullet above. Timing/rhythm is still an
+open gap: the app assumes a fixed 120 BPM everywhere, and Mrs Magic almost certainly
+isn't at exactly that tempo — real tempo detection would be needed to fix it properly,
+and doesn't exist yet.
 
 ---
 
@@ -953,7 +980,7 @@ For Solo Arrangement projects (v1.0, stems upgraded in v0.9.6), it additionally 
 | Method | Path | Description |
 | --- | --- | --- |
 | GET | `/engine-lab/engines` | List engines with availability (`{"available": bool, "unavailable_reason": string\|null}`) |
-| GET | `/engine-lab/fixtures` | List the five built-in synthetic test clips |
+| GET | `/engine-lab/fixtures` | List the six built-in synthetic test clips |
 | GET | `/engine-lab/fixtures/{key}/audio` | Stream a fixture's generated audio |
 | GET | `/engine-lab/sources` | List projects with audio + fixtures, for the source picker |
 | POST | `/engine-lab/audio` | Upload audio directly into the lab (multipart field `file`) — returns `{"audio_id"}` |

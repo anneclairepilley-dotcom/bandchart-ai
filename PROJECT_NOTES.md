@@ -1,6 +1,6 @@
 # BandChart AI — Project Notes
 
-Living notes for contributors (human or AI). Last updated after v0.9.6 (2026-07).
+Living notes for contributors (human or AI). Last updated after v0.9.7 (2026-07).
 If you are a new Claude Code session: read this file, then README.md, before changing code.
 
 ## Purpose
@@ -220,6 +220,81 @@ Explanations, error messages, and README instructions must stay beginner-friendl
   padding, readable-mode long-note truncation, a Start double-click race, the
   0.0-certainty mask, same-slot keep-later inconsistency, stale YouTube copy, stale
   setupError, and the frontend's hardcoded 2s bars — all fixed and re-verified
+
+### v0.9.7 — Basic Pitch tuning from real Mrs Magic feedback (done)
+First version driven by an actual real-world test result rather than synthetic fixtures
+or a formal spec: the owner ran Mrs Magic on their Mac (v0.9.6 shipped explicitly asking
+for this) and reported back — Basic Pitch ran (confirmed; Piano Expert isn't installed
+on their machine), "got the main idea and the multiple notes but wasn't perfect": wrong
+notes, missing notes, timing/rhythm off, and too dense to read. Scoped this round to what
+could be fixed with real evidence and verified in this sandbox (Basic Pitch itself runs
+here, even though Mrs Magic's actual audio can't be fetched — YouTube's still blocked);
+timing/rhythm is flagged as a separate, bigger follow-up rather than hacked at blind.
+
+**`backend/app/polyphonic.py`** — two targeted, both Basic-Pitch-only (the CQT fallback
+is untouched):
+1. **Octave doublings were being dropped as false harmonics.** `_suppress_harmonics()`
+   (added v0.9.3) was written for and tuned against the CQT fallback — a hand-tuned
+   spectral heuristic with no real sense of "is this a played note," which genuinely
+   needs a broad harmonic-interval list (octave, 12th, double-octave, etc.) to avoid
+   ghosts. That same list was also being applied to Basic Pitch's output, a trained ML
+   model with much better inherent discrimination — and octave doublings (a bass note
+   played with its own octave, a melody doubled an octave up) are extremely common,
+   *intentional* piano writing, not a spectral ghost. New `BP_HARMONIC_INTERVALS = (19,
+   24, 28)` — same as before minus the octave (`12`) — passed to `_suppress_harmonics()`
+   only for the Basic Pitch path; `_detect_with_cqt` keeps the original full
+   `HARMONIC_INTERVALS`, unchanged. **Verified this was a real, not just theoretical,
+   gap**: a balanced-amplitude synthetic test didn't reproduce it (both notes' Basic
+   Pitch confidence came back too close together to trip the 0.8 ratio either way — real
+   playing is rarely that evenly voiced), so the Engine Lab's new `octave_doubling`
+   fixture deliberately voices the octave note quieter (confirmed via raw Basic Pitch
+   output: 0.47 vs 0.66 confidence, a 0.71 ratio — below the 0.8 threshold) to actually
+   exercise the check; with the OLD interval set the quiet octave note is dropped, with
+   the NEW one it survives — a real before/after difference, not a no-op fix
+2. **Repeated chord events add clutter.** New `_merge_repeated_chords()`: consecutive
+   chord/note events sharing the EXACT same pitch set, separated by ≤
+   `CHORD_REPEAT_GAP_S` (0.25s), merge into one longer event — the model can re-trigger
+   the same held chord multiple times on a real piano's sustain-pedal resonance, and
+   each repeat was previously its own separate engraved event. Runs after
+   `_assign_groups` inside `_detect_with_basic_pitch`; message "Repeated chord events
+   were merged to reduce clutter." when it actually changes anything. Unit-tested
+   directly on crafted note dicts (repeat within gap → merges; different pitch set →
+   doesn't; repeat but gap too large → doesn't; single ungrouped note → doesn't crash)
+   since real Basic Pitch re-triggering behavior on a held pedal chord can't be reliably
+   forced from synthetic audio in this sandbox
+
+**`backend/app/engine_lab/fixtures.py`** — new `octave_doubling` fixture (6th fixture,
+appended after the original 5; not part of the owner's original benchmark order),
+permanently regression-tests the real-world failure mode above instead of relying on
+one-off manual verification.
+
+**What this does NOT fix**: wrong notes beyond harmonic-interval scope (Basic Pitch's
+own model limits on real, non-synthetic, possibly-noisy/reverberant audio are what they
+are — no post-filter can add accuracy the model doesn't have) and — the honest big one —
+**timing/rhythm**. The app quantizes everything to a fixed 120 BPM assumption
+(`transcription.py`/`musicxml.py`/`notation_cleanup.py`, unchanged since v0.1); Mrs Magic
+is a real recording almost certainly not at exactly 120 BPM, so ALL rhythm quantization
+(readable-mode snapping especially) will drift from the actual performance regardless of
+how good note detection gets. Fixing this needs real tempo estimation, which doesn't
+exist anywhere in the app — flagged as a candidate next feature, not attempted here
+(deliberately: guessing at a quick tempo-detection hack without evidence risks a worse,
+less predictable result than the current honest "fixed 120 BPM, Precise mode is the
+escape hatch" limitation).
+
+**Testing**: unit-tested directly against real Basic Pitch inference (installed in this
+sandbox) on the new fixture — confirmed via raw model output inspection, not just the
+final result, that the fix changes behavior (old interval set drops the quiet octave
+note, new one keeps it); `_merge_repeated_chords` unit-tested on crafted note dicts (real
+audio can't reliably reproduce pedal re-triggering); C major chord gate re-verified
+unchanged; full re-run of all existing Playwright suites (v0.9.3/Engine Lab/v0.9.5/v1.0/
+v0.9.6, ~160 checks) — all green, including the Engine Lab suite which now exercises 6
+fixtures instead of 5.
+
+**Mrs Magic**: still not independently verified by this session (YouTube blocked here,
+same as ever) — these are principled, evidence-backed improvements to a real reported
+failure mode, not a claim that Mrs Magic now transcribes perfectly. The owner would need
+to re-test on their Mac to confirm the actual before/after difference on the real
+recording.
 
 ### v0.9.6 — serious transcription engine stack (done)
 Built chronologically AFTER v1.0, deliberately numbered lower: the owner's explicit
@@ -1077,7 +1152,11 @@ Next.js proxy, plus confirmed by the owner in Codespaces:
   change
 - **Rhythm is approximate**: fixed 120 BPM assumption default 4/4 (3/4 and 6/8 selectable);
   cleaned style quantizes to an eighth grid (raw: sixteenth) — no real tempo/meter
-  detection, so timing won't match a performance that isn't near 120 BPM
+  detection, so timing won't match a performance that isn't near 120 BPM. **v0.9.7:
+  confirmed as the likely biggest remaining gap on real recordings** (owner feedback on
+  Mrs Magic specifically called out timing/rhythm as off, alongside note accuracy that
+  v0.9.7 did address) — real tempo estimation is a candidate next feature, not attempted
+  yet
 - **Cleanup trade-offs**: repeated same-pitch notes with small gaps can still merge when
   there's no clear re-attack (v0.9.3 splits them when the loudness dips and rises);
   genuinely fast ornaments shorter than ~0.15s are treated as noise and dropped;
@@ -1130,7 +1209,8 @@ backend/  FastAPI (Python 3.9+; owner's Codespace uses 3.12)
   app/tablature.py      text tab for guitar/bass/ukulele (tunings, octave fit, layout)
   app/polyphonic.py     polyphonic detection: Basic Pitch (ONNX, lazy import) primary,
                         CQT+onset fallback; chord grouping, max_polyphony param (v0.9.5:
-                        instrument-specific caps, e.g. violin=2)
+                        instrument-specific caps, e.g. violin=2); v0.9.7: octave-scoped
+                        harmonic suppression for Basic Pitch + repeated-chord merge
   app/routing.py         v0.9.5 smart routing: per-instrument polyphony cap + default
                         note_detection + caution notes + describe_difficulty()
   app/separation.py     optional Demucs 4-stem adapter (v0.9.6: vocals/drums/bass/other;

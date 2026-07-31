@@ -146,17 +146,65 @@ def _build_bass_and_melody() -> Fixture:
     )
 
 
+def _build_octave_doubling() -> Fixture:
+    total_s = 2.4
+    mix = np.zeros(int(SAMPLE_RATE * total_s))
+
+    def add(y: np.ndarray, at: float) -> None:
+        i = int(at * SAMPLE_RATE)
+        mix[i : i + len(y)] += y[: len(mix) - i]
+
+    # Left hand: a bass note doubled an octave above — extremely common,
+    # intentional piano writing (see v0.9.7 notes below), not a harmonic
+    # ghost. Deliberately voiced UNEVENLY (the octave note quieter than the
+    # root, as real playing often is) so this actually exercises the
+    # harmonic-suppression confidence-ratio check rather than passing by
+    # accident — a balanced-amplitude version of this fixture didn't
+    # reproduce the real-world drop (both notes' confidence came back too
+    # close together to trip HARMONIC_TOLERANCE either way).
+    add(_tone([36], 2.2, amp=0.8), 0.0)  # C2, full strength
+    add(_tone([48], 2.0, amp=0.18), 0.0)  # C3, the octave doubling, quieter
+    melody = [(64, 0.0), (67, 0.6), (72, 1.2), (67, 1.8)]
+    for pitch, start in melody:
+        add(_tone([pitch], 0.55, amp=0.75), start)
+
+    mix = 0.9 * mix / max(1e-9, np.abs(mix).max())
+    expected = [_expected(36, 0.0, 2.2), _expected(48, 0.0, 2.2)]
+    expected += [_expected(p, s, 0.55) for p, s in melody]
+    return Fixture(
+        key="octave_doubling",
+        label="Octave-doubled bass + melody",
+        description="A bass note played together with its own octave (C2+C3), "
+        "under a short right-hand melody — v0.9.7: real-world feedback (the "
+        "\"Mrs Magic\" benchmark) found Basic Pitch's harmonic-ghost filter was "
+        "dropping real octave doublings like this one. Tests that both bass "
+        "notes survive.",
+        audio=mix.astype(np.float32),
+        expected_notes=expected,
+    )
+
+
 _BUILDERS = {
     "a4_tone": _build_a4_tone,
     "c_major_chord": _build_c_major_chord,
     "c_major_scale": _build_c_major_scale,
     "block_chords": _build_block_chords,
     "bass_and_melody": _build_bass_and_melody,
+    "octave_doubling": _build_octave_doubling,
 }
 
 # Display order matches the owner's benchmark order (steps 1-5; step 6 is
 # the real-world Mrs Magic benchmark, which has no synthetic fixture).
-FIXTURE_KEYS = ["a4_tone", "c_major_chord", "c_major_scale", "block_chords", "bass_and_melody"]
+# octave_doubling (v0.9.7) is appended last — a targeted regression check
+# for the real-world octave-doubling fix, not part of the original order.
+FIXTURE_KEYS = [
+    "a4_tone",
+    "c_major_chord",
+    "c_major_scale",
+    "block_chords",
+    "bass_and_melody",
+    "octave_doubling",
+]
 
 
 def list_fixtures() -> list[Fixture]:
