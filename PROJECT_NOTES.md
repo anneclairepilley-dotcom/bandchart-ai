@@ -1,6 +1,6 @@
 # BandChart AI — Project Notes
 
-Living notes for contributors (human or AI). Last updated after v0.9.7 (2026-07).
+Living notes for contributors (human or AI). Last updated after v0.9.8 (2026-07).
 If you are a new Claude Code session: read this file, then README.md, before changing code.
 
 ## Purpose
@@ -220,6 +220,126 @@ Explanations, error messages, and README instructions must stay beginner-friendl
   padding, readable-mode long-note truncation, a Start double-click race, the
   0.0-certainty mask, same-slot keep-later inconsistency, stale YouTube copy, stale
   setupError, and the frontend's hardcoded 2s bars — all fixed and re-verified
+
+### v0.9.8 — instrument-focused Solo Arrangement (done)
+Request said "Build BandChart AI v0.9.7 only," but v0.9.7 (Basic Pitch tuning from real
+Mrs Magic feedback) had already shipped in the immediately preceding turn — built this as
+**v0.9.8** instead of reusing the number, flagged to the owner rather than silently
+overwriting or blocking on a question (same judgment-call pattern as v0.9.6 following
+v1.0). Goal: narrow the app around the 7 real instruments it's actually built for
+(Guitar, Bass, Piano, Violin, Alto Sax, Trumpet, Voice) and make Solo Arrangement
+instrument-aware instead of one-size-fits-all. Explicit prohibitions honored: no drums,
+no new instruments, no accounts/payments, no v2.0 redesign, the weak chord feature stayed
+parked, nothing else (upload/YouTube/Basic Pitch/pYIN/Engine Lab/exports/Play
+Along/note editing/TAB/grand staff) broke.
+
+**`backend/app/instrument_profiles.py`** (new) — single source-of-truth
+`InstrumentProfile` dataclass table for the 7 main instruments: display name, concert
+(sounding) MIDI range, comfortable range, written offset, clef, `max_simultaneous_notes`,
+tab support, a short solo-focus description. `MAIN_INSTRUMENTS` lists the 7 keys in
+picker order. Deliberately does NOT touch `musicxml.py`'s existing `INSTRUMENTS`/
+`TUNINGS` dicts (concert/flute/tenor_sax/clarinet/ukulele still fully work there) —
+this table is additive, everything else falls back to its old behaviour via
+`.get(instrument, <old default>)`.
+
+**`backend/app/range_fit.py`** (new) — "Fit to instrument range," the last Solo
+Arrangement step. Notes are grouped into phrases (silence gap ≥1.0s starts a new
+phrase); each phrase shifts by ONE whole-octave amount, chosen by **majority vote**
+among the phrase's out-of-range notes (must be ≥half the phrase, not just any vote) —
+an isolated outlier in an otherwise in-range phrase doesn't drag the whole phrase with
+it. Only genuine stragglers still out of range after their phrase's shift get clamped
+individually. Whole octaves only, never an arbitrary semitone transpose (keeps the key).
+**Bug caught by my own unit tests before shipping**: the first version applied a
+phrase-wide shift whenever ANY note was out of range, regardless of vote size — fixed by
+requiring a real majority (`votes[winner] >= len(phrase) / 2`); re-verified with an
+adversarial "one outlier among several in-range notes" case.
+
+**`backend/app/routing.py`** — `INSTRUMENT_MAX_POLYPHONY` now derived directly from
+`instrument_profiles.PROFILES` (piano=6 [was 4], guitar=4, violin=2, bass/alto_sax/
+trumpet/voice=1) instead of hardcoded per-instrument entries; melody-only instruments
+capped at 1 naturally degrade a manually-forced "poly" request to monophonic output via
+the existing `_assign_groups(max_polyphony=1)` mechanism — no special-case rejection
+code needed. `SOLO_AUTO_POLY_INSTRUMENTS` gains `"guitar"` (Solo Arrangement now attempts
+real multi-note TAB, so defaulting to poly detection is worth it there, same as Piano).
+
+**`backend/app/arrangement.py`** — `arrangement_difficulty` (easy/medium) renamed
+`arrangement_density` (simple/balanced/detailed) with new support-note budgets
+(`SUPPORT_NOTE_BUDGET = {simple: 6, balanced: 20, detailed: 40}`) and minimum gaps; the
+"piano_style" arrangement focus is dropped entirely (support notes now purely
+density-controlled). New final pipeline step calls `range_fit.fit_notes_to_range()`
+against the chosen instrument's profile (concert pitch — Alto Sax/Trumpet's written
+transposition still only applies at MusicXML/PDF export time, unchanged); result gains
+`"range_fitting"` (`"none"`/`"octave_shifted"`/`"simplified"`) alongside the renamed
+`"arrangement_density"`.
+
+**`backend/app/tablature.py`** — Guitar TAB now genuinely attempts a playable multi-note
+chord instead of always collapsing to the top note. New `_try_chord_assignment()`:
+brute-force `itertools.permutations` search over which string each simultaneous pitch
+goes on, filtered by fret validity (0–15) and hand span (≤4 frets among non-open frets),
+scored by (frets-over-12 count, span, fret sum). Returns an index-parallel
+`list[tuple[string, fret]]`, deliberately NOT a pitch-keyed dict — caught in design
+review, before writing the caller, that two notes in a cluster could land on the same
+pitch after range-fitting and silently collide in a dict keyed by pitch value.
+`build_tab()` branches on `instrument_key == "guitar"`: progressively drops the
+lowest-confidence note and retries when no complete assignment exists, down to a single
+note if needed (`simplified_chords` counter → the exact warning "Some guitar notes were
+simplified because the detected chord was not playable."); bass/ukulele keep their
+original top-note-only logic completely unchanged. `_layout_systems()` rewritten to
+group same-time-window entries into one shared column (multiple strings, one time slot)
+instead of always one column per entry — verified byte-identical to the old layout for
+the single-note-per-cluster case (i.e. every pre-v0.9.8 use of tab).
+
+**`backend/app/models.py` / `backend/app/main.py`** — `Project`/`ProjectSettings`
+`arrangement_difficulty` → `arrangement_density` throughout (validation set, error
+messages, the `set_project_settings`/`transcribe`/`_save_working_notes` preserved-fields
+dict, which also gains a new preserved `"range_fitting": None` entry); `piano_style`
+dropped from `VALID_ARRANGEMENT_FOCUSES`.
+
+**Frontend** (`frontend/lib/instruments.ts`, `lib/api.ts`,
+`app/projects/[id]/page.tsx`) — new `MAIN_INSTRUMENTS`/`MAIN_INSTRUMENT_KEYS` exports
+(guitar/bass/piano/violin/alto_sax/trumpet/voice, mirrors the backend's
+`instrument_profiles.MAIN_INSTRUMENTS`); the full `INSTRUMENTS` list is untouched and
+still used for label lookups on old/hidden-instrument projects, just no longer the
+source for either picker (the setup grid and the post-transcription "Solo instrument"
+dropdown both switched to `MAIN_INSTRUMENTS`). `defaultNoteDetection()` now takes mode
+too, so Guitar + Solo arrangement also pre-selects poly detection (mirrors
+`SOLO_AUTO_POLY_INSTRUMENTS`). Arrangement focus radio drops "Piano-style arrangement";
+"Arrangement difficulty" (Easy/Medium) replaced with "Arrangement density"
+(Simple/Balanced/Detailed). Status block rebuilt: `engine-status` (Direct transcription)
+now shows Instrument/Mode/Engine used/Detection mode/Fallback/Warnings and is gated to
+`project.mode !== "solo_arrangement"` (previously it had no such gate and rendered
+redundantly alongside `arrangement-status` for every Solo project — fixed as a side
+effect, not separately requested); `arrangement-status` (Solo arrangement) gains
+Instrument/Detection mode/Arrangement density/Range fitting lines alongside its existing
+Source/Engine/Arrangement focus/Warnings. Default `instrumentKey` changed from
+`"concert"` to `"piano"` (Concert pitch is no longer a user-facing choice, per the
+request "it can remain internally if needed for calculations, but users should not see
+it as an instrument").
+
+**Testing**: unit-tested each new/changed module directly (instrument profiles, range
+fitting's phrase/majority-vote logic including the outlier-vote bug fix, guitar chord
+placement, arrangement density budgets) before any server involvement, matching this
+project's established methodology. Then a real end-to-end pass against the running
+FastAPI server (22 checks: Piano C-major chord preserved in both Direct and Solo, Guitar
+Solo multi-note TAB across multiple strings in one column, Bass/Alto Sax/Trumpet/Voice
+range-fitting into their profile ranges with correct MusicXML export, Violin capped at 2
+simultaneous notes, Piano density Simple vs. Detailed producing more support notes) — all
+passed. A Playwright suite against the built app (35 checks: picker shows exactly the 7
+main instruments and never Concert pitch/Flute/Clarinet/Tenor Sax/Ukulele, density UI
+hidden for Direct transcription and showing all 3 options for Solo, no Piano-style
+option, the new status block's Instrument/Mode/Detection mode lines, blue playhead, note
+editing, MIDI/JSON/MusicXML/PDF/TAB downloads, Play Along controls, chord feature still
+collapsed under Experimental tools, Engine Lab loads, project delete) — all passed.
+**Environment note, not a regression**: this sandbox's `next dev` (Turbopack) has a
+broken HMR WebSocket that, here, left client-side `useEffect` calls (and therefore all
+`fetch()`-based data loading) never firing at all — confirmed via a `window.fetch`
+intercept that never triggered, despite `useState`-driven interactivity (e.g. checkbox
+clicks) working fine. This reproduces on `app/page.tsx`, code untouched by this version,
+so it's a dev-server-only quirk in this container, not caused by or fixed in this
+version's changes. Building with `next build && next start` (production mode, no HMR)
+sidesteps it completely — that's what the Playwright suite above actually ran against.
+Worth knowing for future sessions in this same environment: don't trust a stuck "Loading
+projects…" on `next dev` here as a real bug without first trying a production build.
 
 ### v0.9.7 — Basic Pitch tuning from real Mrs Magic feedback (done)
 First version driven by an actual real-world test result rather than synthetic fixtures

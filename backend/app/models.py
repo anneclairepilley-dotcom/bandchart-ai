@@ -31,9 +31,11 @@ class Project(BaseModel):
     key_signature: Optional[str] = None  # "predict" | "C" | "G" | ... | "Dm"
     rhythm_detail: Optional[str] = None  # "readable" | "precise"
     note_detection: Optional[str] = None  # "melody" | "poly" (v0.9.2)
-    # v1.0 Solo Arrangement controls (ignored for Direct transcription).
-    arrangement_focus: Optional[str] = None  # "main_melody" | "melody_support" | "piano_style"
-    arrangement_difficulty: Optional[str] = None  # "easy" | "medium"
+    # Solo Arrangement controls (ignored for Direct transcription).
+    arrangement_focus: Optional[str] = None  # "main_melody" | "melody_support"
+    # v0.9.8: renamed from arrangement_difficulty (easy/medium) to a 3-tier
+    # density control.
+    arrangement_density: Optional[str] = None  # "simple" | "balanced" | "detailed"
 
 
 class ProjectCreate(BaseModel):
@@ -93,9 +95,9 @@ class ProjectSettings(BaseModel):
     key_signature: str = "predict"
     rhythm_detail: str = "readable"
     note_detection: str = "melody"
-    # v1.0 Solo Arrangement controls (ignored for Direct transcription).
+    # Solo Arrangement controls (ignored for Direct transcription).
     arrangement_focus: str = "main_melody"
-    arrangement_difficulty: str = "easy"
+    arrangement_density: str = "simple"
 
 
 class TranscriptionResult(BaseModel):

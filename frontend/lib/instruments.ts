@@ -25,6 +25,11 @@ export interface InstrumentOption {
   patch: PlaybackPatch;
 }
 
+// v0.9.8: BandChart AI is now focused around 7 real instruments. These
+// stay in INSTRUMENTS (nothing is deleted — old projects saved with one of
+// these still load, resolve and export fine), but the user-facing pickers
+// below only ever show MAIN_INSTRUMENTS. Concert pitch can still be used
+// internally for calculations, but users no longer see it as a choice.
 export const INSTRUMENTS: InstrumentOption[] = [
   { key: "concert", label: "Concert pitch", writtenOffset: 0, patch: "piano" },
   { key: "piano", label: "Piano", writtenOffset: 0, patch: "piano" },
@@ -60,6 +65,25 @@ export const INSTRUMENTS: InstrumentOption[] = [
     patch: "uke",
   },
 ];
+
+// The 7 real instruments the app is now focused around. Mirrors the
+// backend's instrument_profiles.py::MAIN_INSTRUMENTS — keep both in sync.
+// Every other key above (concert, flute, tenor_sax, clarinet, ukulele)
+// stays fully supported by the backend, just hidden from this list.
+export const MAIN_INSTRUMENT_KEYS = [
+  "guitar",
+  "bass",
+  "piano",
+  "violin",
+  "alto_sax",
+  "trumpet",
+  "voice",
+];
+
+/** The curated instrument picker list, in MAIN_INSTRUMENT_KEYS order. */
+export const MAIN_INSTRUMENTS: InstrumentOption[] = MAIN_INSTRUMENT_KEYS.map(
+  (key) => INSTRUMENTS.find((i) => i.key === key)!
+);
 
 /** Auto playback patch for an instrument key (piano-ish fallback). */
 export function patchForInstrument(instrumentKey: string): PlaybackPatch {

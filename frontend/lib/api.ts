@@ -38,8 +38,10 @@ export interface Project {
   note_detection?: "melody" | "poly" | null;
   // v1.0 Solo Arrangement controls (absent/null on older projects, and
   // ignored by Direct transcription).
-  arrangement_focus?: "main_melody" | "melody_support" | "piano_style" | null;
-  arrangement_difficulty?: "easy" | "medium" | null;
+  arrangement_focus?: "main_melody" | "melody_support" | null;
+  // v0.9.8: renamed from arrangement_difficulty (easy/medium) to a 3-tier
+  // density control.
+  arrangement_density?: "simple" | "balanced" | "detailed" | null;
 }
 
 /** Pre-transcription choices saved via POST /projects/{id}/settings. */
@@ -50,8 +52,8 @@ export interface ProjectSettingsPayload {
   key_signature: string;
   rhythm_detail: "readable" | "precise";
   note_detection: "melody" | "poly";
-  arrangement_focus: "main_melody" | "melody_support" | "piano_style";
-  arrangement_difficulty: "easy" | "medium";
+  arrangement_focus: "main_melody" | "melody_support";
+  arrangement_density: "simple" | "balanced" | "detailed";
 }
 
 export interface Note {
@@ -107,8 +109,10 @@ export interface NotesResponse {
   arrangement_source?: string | null;
   /** Which source-separation engine ran, if any: "demucs" or null. */
   separation_engine?: string | null;
-  arrangement_focus?: "main_melody" | "melody_support" | "piano_style" | null;
-  arrangement_difficulty?: "easy" | "medium" | null;
+  arrangement_focus?: "main_melody" | "melody_support" | null;
+  arrangement_density?: "simple" | "balanced" | "detailed" | null;
+  /** v0.9.8 "Fit to instrument range" outcome: "none" | "octave_shifted" | "simplified". */
+  range_fitting?: string | null;
 }
 
 /**

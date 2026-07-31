@@ -2,13 +2,34 @@
 
 AI music arranging and rehearsal app that turns songs into editable lead sheets, solo sheets, band charts and custom arrangements.
 
-## v0.9.7 — Basic Pitch tuning from real Mrs Magic feedback
+## v0.9.8 — Instrument-focused Solo Arrangement
 
 This is the smallest possible working prototype: a local web app where you upload an audio
 file and the backend runs **real audio-to-pitch transcription**. Everything runs on your own
 computer — no accounts, no payments, no cloud services, no data leaves your machine.
 
-**v0.9.7 is a small, targeted quality patch driven by a real test result**, not a
+**v0.9.8 narrows the app around the 7 real instruments it's actually built for — Guitar,
+Bass, Piano, Violin, Alto Sax, Trumpet, Voice — and makes Solo Arrangement genuinely
+instrument-aware instead of one-size-fits-all.** The instrument picker (and the "Solo
+instrument" selector on the results page) now show only those 7; Concert pitch and the
+other backend-supported keys (Flute, Clarinet, Tenor Sax, Ukulele) are hidden from the
+main workflow, not deleted — old projects and direct backend/API use still work with
+them. A new central instrument profile table (`backend/app/instrument_profiles.py`) gives
+each of the 7 a real playable range (in concert/sounding MIDI), how many simultaneous
+notes it can take, and its Solo Arrangement treatment. A new **"Fit to instrument range"**
+step octave-shifts notes that fall outside that range — by whole phrases, never
+individual random jumps, so the tune keeps its shape and key — with an honest warning
+whenever it happens. **Guitar** Solo Arrangement now genuinely attempts playable
+multi-note **TAB** for detected chords (a real fret/string search, not just the top note),
+with a warning when a chord can't be placed and gets simplified. **Arrangement difficulty**
+(Easy/Medium) is replaced with a 3-tier **Arrangement density** (Simple/Balanced/Detailed),
+and the old "Piano-style arrangement" focus option is dropped (Piano/Guitar support notes
+are controlled by density instead). See **Instrument profiles & range fitting** and
+**Solo Arrangement** below for the full details. Explicitly not part of this version:
+no drums, no new instruments, no accounts/payments, no v2.0 redesign — Ultimate
+Guitar-style chord sheets remain a much later feature (probably v5.0).
+
+**v0.9.7 was a small, targeted quality patch driven by a real test result**, not a
 synthetic benchmark: the owner ran Mrs Magic locally on their Mac (Basic Pitch, Piano
 Expert not installed there) and reported it "got the main idea and the multiple notes
 but wasn't perfect" — wrong notes, missing notes, timing off, and too dense to read.
@@ -83,9 +104,11 @@ Two detection engines are selectable in the main app (v0.9.3):
 - Run real pitch-tracking transcription on the uploaded audio (librosa pYIN, runs on CPU, no GPU/TensorFlow needed)
 - Generate a MIDI file and a JSON file listing every detected note (pitch, start time, duration, confidence)
 - Preview the transcription in the browser (simple piano-roll + note table)
-- Pick a solo instrument (concert pitch, piano, flute, violin, voice/vocals, alto sax,
-  tenor sax, trumpet, clarinet, guitar, bass guitar, ukulele) — the note table shows both
-  the detected concert pitch and the written pitch, transposed for E♭/B♭ instruments
+- Pick a solo instrument — **Guitar, Bass, Piano, Violin, Alto Sax, Trumpet or Voice**
+  (v0.9.8: the picker is narrowed to these 7 real instruments; Concert pitch, Flute,
+  Clarinet, Tenor Sax and Ukulele are hidden from the main workflow but still work via
+  the backend/API and on older projects) — the note table shows both the detected
+  concert pitch and the written pitch, transposed for E♭/B♭ instruments
 - **Tablature for guitar, bass and ukulele** (v0.7): picking one of the fretted
   instruments swaps the sheet-music view for a plain text-style **tab preview** —
   string lines with fret numbers in standard tuning, built from the same detected
@@ -149,16 +172,19 @@ Two detection engines are selectable in the main app (v0.9.3):
   harmonic ghosts and dropped, and repeated chord events from sustain-pedal resonance
   are merged instead of cluttering the sheet — both fixed from real feedback testing
   against a hard real-world recording, not just synthetic test clips
-- **Smart transcription routing** (v0.9.5): Piano now defaults to multiple-note
-  detection in BOTH Direct transcription and Solo arrangement (grand staff either way);
-  Guitar and Violin can use multiple-note detection too, with Violin capped at 2
-  simultaneous notes (double-stops) and a caution note for both; Bass and the
-  melody-first instruments (Alto Sax, Trumpet, Voice, and others) stay melody only by
-  default. Every transcribed project shows an honest status block under the audio
-  player — "Engine used", "Mode", "Fallback" (e.g. "Basic Pitch failed, used
-  melody-only fallback." when it genuinely degrades), and "Warnings" (a rough density
-  read plus any instrument-specific caution) — never hidden, so you always know what
-  actually ran
+- **Smart transcription routing** (v0.9.5, instrument caps centralised in v0.9.8): Piano
+  defaults to multiple-note detection in BOTH Direct transcription and Solo arrangement
+  (grand staff either way); Guitar now also defaults to it in Solo arrangement (v0.9.8 —
+  Solo Arrangement attempts real playable multi-note TAB), and can be turned on manually
+  for Direct transcription too; Violin can use multiple-note detection capped at 2
+  simultaneous notes (double-stops); Bass and the melody-first instruments (Alto Sax,
+  Trumpet, Voice) stay melody only. Every transcribed project shows an honest status
+  block under the audio player — **Instrument**, **Mode** (Direct transcription / Solo
+  arrangement), **Engine used**, **Detection mode**, and for Solo Arrangement also
+  **Arrangement density** and **Range fitting**, plus **Fallback** (e.g. "Basic Pitch
+  failed, used melody-only fallback." when it genuinely degrades) and **Warnings** (a
+  rough density read plus any instrument-specific caution) — never hidden, so you always
+  know what actually ran
 - **A stronger engine stack** (v0.9.6): Piano now tries the **Piano Expert** specialist
   model first (when installed), before Basic Pitch — same fallback chain, same honest
   status block, just one more (optional) engine ahead of it. Solo Arrangement's optional
@@ -184,30 +210,38 @@ Two detection engines are selectable in the main app (v0.9.3):
   **Experimental tools** at the bottom of the project page instead of cluttering the
   main flow. Proper Ultimate Guitar-style chord sheets are a much later feature,
   probably v5.0
-- **Solo Arrangement for real songs** (v1.0, stem routing upgraded in v0.9.6): choosing
-  **Solo arrangement** now runs its own pipeline instead of the plain single-line
-  detector — it tries to separate the song into stems and picks the one that matches
-  your instrument (vocals for Voice/Violin/Alto Sax/Trumpet, its own bass stem for Bass,
-  the accompaniment stem for Piano/Guitar), falling back to the full mix, honestly, when
-  it can't separate at all. Piano/Guitar can also add a small number of simple
-  supporting notes. New **Arrangement focus** (Main melody / Melody + simple support /
-  Piano-style arrangement) and **Arrangement difficulty** (Easy / Medium) controls
-  appear in Advanced settings when Solo arrangement is selected. See **Solo Arrangement**
-  and **Transcription engine stack** below
+- **Solo Arrangement for real songs** (v1.0, stem routing upgraded in v0.9.6,
+  instrument-aware since v0.9.8): choosing **Solo arrangement** runs its own pipeline
+  instead of the plain single-line detector — it tries to separate the song into stems
+  and picks the one that matches your instrument (vocals for Voice/Violin/Alto
+  Sax/Trumpet, its own bass stem for Bass, the accompaniment stem for Piano/Guitar),
+  falling back to the full mix, honestly, when it can't separate at all. Piano/Guitar can
+  also add a small number of simple supporting notes, and **Guitar now attempts real
+  playable multi-note TAB** for detected chords (v0.9.8). New **Arrangement focus** (Main
+  melody / Melody + simple support) and **Arrangement density** (Simple / Balanced /
+  Detailed, v0.9.8 — replaces the old Easy/Medium difficulty) controls appear in Advanced
+  settings when Solo arrangement is selected. A final **"Fit to instrument range"** step
+  (v0.9.8) octave-shifts any notes outside the chosen instrument's playable range, by
+  whole phrases so the tune keeps its shape. See **Instrument profiles & range fitting**,
+  **Solo Arrangement** and **Transcription engine stack** below
 - **Delete projects**: a Delete button beside each project on the dashboard removes the
   project with its uploaded audio and generated files, after a confirmation prompt
 
 **Explicitly out of scope so far:** accounts, payments, full band charts, rehearsal packs,
-complex editing, drums, automatic chord detection from recordings (the parked chord tools
-are manual markers plus rough melody-based suggestions; Ultimate Guitar-style chord
-sheets are a much later feature, probably v5.0), accurate transcription of complex piano
-pieces or full-band mixes (polyphonic detection is experimental and for clear, simple
-material), strummed guitar chord shapes/diagrams, full guitar/bass extraction from mixed
-songs (tab stays melody-first). **Source separation (Demucs, now 4-stem) and Piano
-Expert** both exist in the code as real, working optional adapters but are not installed
-by default and are not active in the hosted environments this app has been tested in —
-see **Transcription engine stack** below; neither promises perfect vocal isolation or
-perfect full-band/dense-piano transcription.
+complex editing, drums, additional instruments beyond the 7 main ones (v0.9.8 —
+Flute/Clarinet/Tenor Sax/Ukulele/Concert pitch still work via the backend/API and old
+projects, just hidden from the main picker), automatic chord detection from recordings
+(the parked chord tools are manual markers plus rough melody-based suggestions; Ultimate
+Guitar-style chord sheets are a much later feature, probably v5.0), accurate transcription
+of complex piano pieces or full-band mixes (polyphonic detection is experimental and for
+clear, simple material), strummed guitar chord shapes/diagrams, full guitar/bass
+extraction from mixed songs (tab stays melody-first — v0.9.8's multi-note guitar TAB
+attempts real chords when it detects them, but isn't full chord-shape recognition).
+**Source separation (Demucs, now 4-stem) and Piano Expert** both exist in the code as
+real, working optional adapters but are not installed by default and are not active in
+the hosted environments this app has been tested in — see **Transcription engine stack**
+below; neither promises perfect vocal isolation or perfect full-band/dense-piano
+transcription.
 
 ---
 
@@ -276,7 +310,7 @@ v0.9.5.
 
 ---
 
-## Solo Arrangement (v1.0, stem routing upgraded in v0.9.6)
+## Solo Arrangement (v1.0, stem routing upgraded in v0.9.6, instrument-aware in v0.9.8)
 
 Solo Arrangement is for turning a **full song** into a playable solo part — different
 from Direct transcription, which is for a clean recording of one instrument or voice.
@@ -292,40 +326,85 @@ Solo Arrangement:
    of the app uses, cleaned up the same way (tiny ghost notes removed, pitch jitter
    smoothed, rhythm quantized for readability)
 4. For **Piano and Guitar only**, when you ask for it (Arrangement focus below), adds a
-   small number of simple low-register supporting notes from the accompaniment stem —
-   never a full reduction of everything detected, just enough for a left hand or a bass
-   note under the melody
-5. Feeds the result into the same sheet music / TAB / MIDI / JSON / MusicXML / PDF / Play
-   Along / note editor as everything else
+   number of simple low-register supporting notes from the accompaniment stem — how many,
+   controlled by **Arrangement density** — never a full reduction of everything detected
+5. **Fits the result to the chosen instrument's playable range** (v0.9.8) — see
+   **Instrument profiles & range fitting** below
+6. Feeds the result into the same sheet music / TAB / MIDI / JSON / MusicXML / PDF / Play
+   Along / note editor as everything else — **Guitar** attempts real playable multi-note
+   TAB for any chords that survive (v0.9.8), not just the top note
 
-**New Arrangement controls** (Advanced settings, only shown for Solo arrangement):
+**Arrangement controls** (Advanced settings, only shown for Solo arrangement):
 - **Arrangement focus**: *Main melody* (default) — melody only, no extra notes; *Melody +
-  simple support* — adds the sparse support notes described above (Piano/Guitar only);
-  *Piano-style arrangement* — same, but always aims for a fuller left hand on Piano
-- **Arrangement difficulty**: *Easy* (default) — fewer, more spaced-out support notes;
-  *Medium* — more of them, closer together
+  simple support* — adds the support notes described above (Piano/Guitar only)
+- **Arrangement density** (v0.9.8, replaces the old Easy/Medium *Arrangement difficulty*):
+  *Simple* (default) — fewest support notes, cleanest to read; *Balanced* — a moderate
+  amount of extra detail; *Detailed* — closer to everything actually detected, still
+  limited by what the instrument can play
 
-**Honest status, every time** — a blue status block under the audio player, shown only
-for Solo arrangement projects, alongside the existing engine status:
+**Honest status, every time** — a status block under the audio player, shown for every
+transcribed project:
 ```
+Instrument: Guitar
 Mode: Solo arrangement
-Source: vocal stem / bass stem / accompaniment / full mix
-Engine: pYIN / Basic Pitch / Piano Expert / Demucs + Basic Pitch
-Arrangement focus: Main melody / Melody + support
+Engine used: Basic Pitch
+Detection mode: Multiple notes
+Source: accompaniment
+Arrangement focus: Melody + support
+Arrangement density: Balanced
+Range fitting: Octave-shifted to fit range
 Warnings: Dense audio may need editing
 ```
-You'll also see one of these exact messages depending on what happened: *"Solo
-Arrangement finds the strongest melody and creates a playable part. Dense songs may need
-editing."* (always), *"Using vocal stem for main melody."* (isolation worked, and this
-instrument uses the vocal stem), *"Source separation failed. Using full mix instead."*
-(separation isn't available — this is the normal case in the hosted environments this
-app has been tested in, see **Transcription engine stack** above), and *"Added simple
-support notes. Please check and edit."* (when support notes were added).
+(Direct transcription projects show the same Instrument/Mode/Engine used/Detection mode
+lines, without the Solo-Arrangement-only ones.) You'll also see one of these exact
+messages depending on what happened: *"Solo Arrangement finds the strongest melody and
+creates a playable part. Dense songs may need editing."* (always), *"Using vocal stem for
+main melody."* (isolation worked, and this instrument uses the vocal stem), *"Source
+separation failed. Using full mix instead."* (separation isn't available — this is the
+normal case in the hosted environments this app has been tested in, see **Transcription
+engine stack** above), *"Added simple support notes. Please check and edit."* (when
+support notes were added), *"Some notes were octave-shifted to fit &lt;Instrument&gt;."*
+(v0.9.8 range fitting moved something), and *"Some guitar notes were simplified because
+the detected chord was not playable."* (v0.9.8 — Guitar TAB couldn't fit every note of a
+detected chord onto the fretboard and dropped the least useful one).
 
 **What this is not**: BandChart AI does not claim to perfectly separate every instrument,
 and Solo Arrangement does not claim to perfectly transcribe a full band. It finds the
 strongest melody it can and builds a playable, editable starting point — dense songs will
 need checking and cleanup, honestly flagged every time.
+
+---
+
+## Instrument profiles & range fitting (v0.9.8)
+
+Every instrument's playable range, transposition and note-taking ability now lives in one
+place — `backend/app/instrument_profiles.py` — instead of being scattered across the
+routing, arrangement and tab code as separate special cases. All ranges are **concert
+(sounding) MIDI** — the pitch a listener actually hears, not what a transposing player
+reads off the page; written-pitch transposition for Alto Sax/Trumpet is applied only at
+MusicXML/PDF export time, same as before.
+
+| Instrument | Playable range | Max simultaneous notes | Notes |
+| --- | --- | --- | --- |
+| Piano | A0–C8 (MIDI 21–108) | 6 | Grand staff, chords preserved |
+| Guitar | E2–E6 (MIDI 40–88) | 4 | Standard tuning; attempts playable multi-note TAB |
+| Bass | E1–G4 (MIDI 28–67) | 1 | Bassline/melody-first, standard tuning |
+| Violin | G3–A7 (MIDI 55–105) | 2 | Melody plus simple double-stops only |
+| Alto Sax | Db3–A5 sounding (MIDI 49–81) | 1 | Melody only; written a major 6th above concert (E♭) |
+| Trumpet | E3–C6 sounding (MIDI 52–84) | 1 | Melody only; written a major 2nd above concert (B♭) |
+| Voice | C3–C5 (MIDI 48–72) | 1 | Melody only, a comfortable singable range |
+
+**"Fit to instrument range"** is the last Solo Arrangement step: notes that fall outside
+the table above are octave-shifted into range. Whole **phrases** move together (grouped by
+gaps of silence ≥1 second, shifted by whichever whole-octave amount most of the phrase's
+out-of-range notes need) rather than shifting note-by-note, so a melody keeps its shape
+instead of jumping around awkwardly; only a genuine straggler still out of range after its
+phrase's shift gets clamped individually. It's always a whole-octave shift (±12
+semitones), never an arbitrary semitone transposition — that keeps the melody in the same
+key. Whenever anything moved, you'll see *"Some notes were octave-shifted to fit
+&lt;Instrument&gt;."* under the audio player. Direct transcription is unaffected — range
+fitting is a Solo Arrangement step, since it needs a single target instrument to fit
+against.
 
 ---
 
@@ -339,11 +418,12 @@ detection setting — and always tells you exactly what it decided.
 
 | Instrument | Direct transcription | Solo arrangement |
 | --- | --- | --- |
-| **Piano** | Basic Pitch, multiple notes (auto-selected), up to 4 at once, grand staff | Basic Pitch, multiple notes (auto-selected), up to 4 at once, grand staff |
-| **Guitar** | Melody only (pYIN) by default; multiple notes if you choose it | Melody only by default; multiple notes if you choose it — shows "Guitar chord/tab output is experimental. TAB may show the main playable line first." TAB always stays melody-first |
-| **Bass** | Melody only (pYIN) by default; no chordal mode yet | Same — melody-first, bass TAB unaffected |
+| **Piano** | Basic Pitch, multiple notes (auto-selected), up to 6 at once, grand staff | Basic Pitch, multiple notes (auto-selected), up to 6 at once, grand staff |
+| **Guitar** | Melody only (pYIN) by default; multiple notes if you choose it, up to 4 at once | Multiple notes (auto-selected, v0.9.8), up to 4 at once — attempts real playable multi-note TAB, with "Guitar TAB attempts a playable multi-note chord where it can. Some notes may be simplified if the detected chord isn't playable." |
+| **Bass** | Melody only (pYIN) by default; no chordal mode | Same — melody-first, bass TAB unaffected |
 | **Violin** | Melody only (pYIN) by default; multiple notes if you choose it | Melody only by default; multiple notes if you choose it, capped at **2 simultaneous notes (double-stops)** — shows "Violin output is limited to melody and simple double-stops for now." |
-| Alto Sax, Trumpet, Voice, and everything else (Flute, Tenor Sax, Clarinet, Ukulele, Concert pitch) | Melody only (pYIN) | Melody only (pYIN) |
+| Alto Sax, Trumpet, Voice | Melody only (pYIN) | Melody only (pYIN) — melody-first by instrument design, per v0.9.8's instrument profiles |
+| Everything else (Flute, Tenor Sax, Clarinet, Ukulele, Concert pitch — hidden from the main picker since v0.9.8, still backend-supported) | Melody only (pYIN) | Melody only (pYIN) |
 
 Every instrument keeps the manual "Note detection" Advanced setting — the table above is
 just the pre-selected default; you can always switch it.
@@ -934,13 +1014,13 @@ All endpoints are under `/api`.
 | GET | `/projects/{id}` | Get one project |
 | POST | `/projects/{id}/audio` | Upload audio (multipart field `file`) |
 | POST | `/projects/{id}/youtube` | Import audio from a YouTube URL — `{"url": string, "rights_confirmed": true}` |
-| POST | `/projects/{id}/settings` | Save the setup choices — `{"instrument", "mode", "time_signature", "key_signature", "rhythm_detail", "note_detection", "arrangement_focus", "arrangement_difficulty"}` (the last two are v1.0, ignored by Direct transcription) |
+| POST | `/projects/{id}/settings` | Save the setup choices — `{"instrument", "mode", "time_signature", "key_signature", "rhythm_detail", "note_detection", "arrangement_focus", "arrangement_density"}` (the last two are v1.0/v0.9.8, ignored by Direct transcription; `arrangement_density` renamed from `arrangement_difficulty` in v0.9.8) |
 | POST | `/projects/{id}/transcribe` | Run transcription on the uploaded audio |
 | GET | `/projects/{id}/notes` | Get the detected-notes JSON |
 | GET | `/projects/{id}/audio` | Stream the original uploaded audio |
 | GET | `/projects/{id}/download/midi` | Download the generated MIDI file |
 | GET | `/projects/{id}/download/json` | Download the generated notes JSON file |
-| GET | `/projects/{id}/download/musicxml?instrument=<key>&style=<clean\|raw>` | Download MusicXML for a solo instrument — instrument keys: `concert`, `piano`, `flute`, `violin`, `alto_sax`, `tenor_sax`, `trumpet`, `clarinet`, `guitar`, `bass`, `ukulele`; style defaults to `clean` (staff notation for all keys, including the fretted ones) |
+| GET | `/projects/{id}/download/musicxml?instrument=<key>&style=<clean\|raw>` | Download MusicXML for a solo instrument — instrument keys: `concert`, `piano`, `flute`, `violin`, `alto_sax`, `tenor_sax`, `trumpet`, `clarinet`, `guitar`, `bass`, `ukulele` (v0.9.8: the app's main picker only shows `guitar`, `bass`, `piano`, `violin`, `alto_sax`, `trumpet`, `voice` — the rest still work here); style defaults to `clean` (staff notation for all keys, including the fretted ones) |
 | GET | `/projects/{id}/download/pdf?instrument=<key>&style=<clean\|raw>` | Download PDF sheet music (same parameters) |
 | GET | `/projects/{id}/tab?instrument=<guitar\|bass\|ukulele>` | Tab layout as JSON (entries, warnings, preview grid) for the in-app tab preview |
 | GET | `/projects/{id}/download/tab?instrument=<guitar\|bass\|ukulele>` | Download the tab as a plain `.txt` file |
@@ -969,11 +1049,14 @@ instrument-specific caution), and `difficulty` (a rough density read, one of `"S
 melody"`, `"Some overlapping notes"`, `"Dense piano/audio — may need editing"`, `"No
 notes detected"`).
 
-For Solo Arrangement projects (v1.0, stems upgraded in v0.9.6), it additionally carries:
-`arrangement_source` (`"vocal_stem"` | `"bass_stem"` | `"accompaniment"` | `"full_mix"`),
-`separation_engine` (`"demucs"` or `null`), `arrangement_focus` (`"main_melody"` |
-`"melody_support"` | `"piano_style"`), and `arrangement_difficulty` (`"easy"` |
-`"medium"`) — `null`/absent for Direct transcription projects.
+For Solo Arrangement projects (v1.0, stems upgraded in v0.9.6, density/range fitting in
+v0.9.8), it additionally carries: `arrangement_source` (`"vocal_stem"` | `"bass_stem"` |
+`"accompaniment"` | `"full_mix"`), `separation_engine` (`"demucs"` or `null`),
+`arrangement_focus` (`"main_melody"` | `"melody_support"` — `"piano_style"` was dropped in
+v0.9.8), `arrangement_density` (`"simple"` | `"balanced"` | `"detailed"` — renamed from
+`arrangement_difficulty`'s `"easy"`/`"medium"` in v0.9.8), and `range_fitting` (`"none"` |
+`"octave_shifted"` | `"simplified"`, v0.9.8) — `null`/absent for Direct transcription
+projects.
 
 ### Engine Lab endpoints (v0.9.4, separate from the main pipeline)
 
